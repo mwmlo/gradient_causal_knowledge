@@ -97,3 +97,15 @@ def test_loaded_bracket_model(model_to_test, n_samples=5000):
     n_correct = (all_logits.argmax(-1).bool() == test_set.isbal).sum()
     print(f"\nModel got {n_correct} out of {len(data)} training examples correct!")
     return all_logits, n_correct / len(data)
+
+
+def test_loaded_bracket_model_on_dataset(model_to_test, dataset, is_balanced):
+    all_logits = []
+    for toks in dataset:
+        logits = model_to_test(toks)[:, 0]
+        all_logits.append(logits)
+    all_logits = torch.cat(all_logits)
+
+    n_correct = (all_logits.argmax(-1).bool() == is_balanced).sum()
+    print(f"\nModel got {n_correct} out of {len(dataset)} training examples correct!")
+    return all_logits, n_correct / len(dataset)
