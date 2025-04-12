@@ -70,13 +70,12 @@ def load_toy_bracket_transformer():
 
 # Load data samples and check that model works
 
-def test_loaded_bracket_model(model_to_test):
-    N_SAMPLES = 5000
+def test_loaded_bracket_model(model_to_test, n_samples=5000):
 
     with open("toy_transformers/brackets_data.json") as f:
         data_tuples = json.load(f)
-        print(f"loaded {len(data_tuples)} examples, using {N_SAMPLES}")
-        data_tuples = data_tuples[:N_SAMPLES]
+        print(f"loaded {len(data_tuples)} examples, using {n_samples}")
+        data_tuples = data_tuples[:n_samples]
 
     data = BracketsDataset(data_tuples)
 
@@ -94,5 +93,7 @@ def test_loaded_bracket_model(model_to_test):
         return all_logits
 
     test_set = data
-    n_correct = (run_model_on_data(model_to_test, test_set).argmax(-1).bool() == test_set.isbal).sum()
+    all_logits = run_model_on_data(model_to_test, test_set)
+    n_correct = (all_logits.argmax(-1).bool() == test_set.isbal).sum()
     print(f"\nModel got {n_correct} out of {len(data)} training examples correct!")
+    return all_logits, n_correct / len(data)
