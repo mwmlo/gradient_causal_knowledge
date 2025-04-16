@@ -2959,7 +2959,7 @@ Error (delta) for blocks.2.hook_mlp_out attribution: -8.628690557088703e-05</cod
     }
       var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
       var mailtoRegex = new RegExp(/^mailto:/);
-        var filterRegex = new RegExp('/' + window.location.host + '/');
+        var filterRegex = new RegExp("https:\/\/mwmlo\.github\.io\/gradient_causal_knowledge\/");
       var isInternal = (href) => {
           return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
       }
