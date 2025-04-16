@@ -6111,8 +6111,9 @@ tensor(0.)</code></pre>
 </ul></li>
 <li>Investigate alternative hypotheses for discrepancies in results
 <ul>
-<li>Identify components which are always highlighted as important by IG</li>
-<li>Generic components: results of IG attribution might match the cumulative scores from causal tracing with a range of different counterfactual activations.</li>
+<li>Generic components: identify components which are always highlighted as important by IG</li>
+<li>Interpolation: results of IG attribution might match the cumulative scores from causal tracing with a range of different counterfactual activations, or they might be OOD.</li>
+<li>IG captures cross-layer dynamics, while patching isolates single-layer effects unnaturally: patch activations at target components but also on downstream layers (path patching)</li>
 </ul></li>
 <li>Complete gradual ablation for causal tracing, and investigate performance results</li>
 </ul>
