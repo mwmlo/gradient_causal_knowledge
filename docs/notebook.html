@@ -6116,8 +6116,16 @@ tensor(0.)</code></pre>
 </ul></li>
 <li>Complete gradual ablation for causal tracing, and investigate performance results</li>
 </ul>
-<p>Since both methods rely on counterfactual reasoning, I wonder if there is some way to generate counterfactual inputs for a target component, such that causal tracing can identify that target component. - Connect counterfactuals and activation patching templates - It would be difficult to extract the original counterfactual input, because the space of activation possibilities at a target layer is infinite.</p>
-<p>Future steps: - Extrapolate to full-sized transformer model - Test alternative attribution methods</p>
+<p>Since both methods rely on counterfactual reasoning, I wonder if there is some way to generate counterfactual inputs for a target component, such that causal tracing can identify that target component.</p>
+<ul>
+<li>Connect counterfactuals and activation patching templates</li>
+<li>It would be difficult to extract the original counterfactual input, because the space of activation possibilities at a target layer is infinite.</li>
+</ul>
+<p>Future steps:</p>
+<ul>
+<li>Extrapolate to full-sized transformer model</li>
+<li>Test alternative attribution methods</li>
+</ul>
 
 
 </section>
