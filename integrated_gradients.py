@@ -323,8 +323,8 @@ class CustomIntegratedGradients(GradientAttribution):
             )
 
         if return_gradient_history:
-            attributions, gradient_history = attributions[0], attributions[1]
-            return _format_output(is_inputs_tuple, attributions), gradient_history
+            attributions, gradient_history, alphas = attributions
+            return _format_output(is_inputs_tuple, attributions), gradient_history, alphas
 
         if return_convergence_delta:
             start_point, end_point = baselines, inputs
@@ -432,7 +432,7 @@ class CustomIntegratedGradients(GradientAttribution):
             )
 
         if return_gradient_history:
-            return attributions, grads
+            return attributions, grads, alphas
         return attributions
 
     def has_convergence_delta(self) -> bool:
@@ -987,7 +987,7 @@ class CustomLayerIntegratedGradients(LayerAttribution, GradientAttribution):
         )
 
         if return_gradient_history:
-            attributions, gradient_history = attributions[0], attributions[1]
+            attributions, gradient_history, alphas = attributions
 
         # handle multiple outputs
         output: List[Tuple[Tensor, ...]] = [
@@ -1000,7 +1000,7 @@ class CustomLayerIntegratedGradients(LayerAttribution, GradientAttribution):
         ]
 
         if return_gradient_history:
-            return _format_outputs(isinstance(self.layer, list), output), gradient_history
+            return _format_outputs(isinstance(self.layer, list), output), gradient_history, alphas
 
         if return_convergence_delta:
             start_point, end_point = baselines, inps
