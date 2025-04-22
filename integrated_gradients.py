@@ -940,6 +940,7 @@ class CustomLayerIntegratedGradients(LayerAttribution, GradientAttribution):
             additional_forward_args=additional_forward_args,
             attribute_to_layer_input=attribute_to_layer_input,
         )
+
         input_layer_list: List[Tuple[Tensor, ...]]
         # if we have one output
         if not isinstance(self.layer, list):
@@ -961,6 +962,7 @@ class CustomLayerIntegratedGradients(LayerAttribution, GradientAttribution):
             additional_forward_args=additional_forward_args,
             attribute_to_layer_input=attribute_to_layer_input,
         )
+
         baselines_layer = flatten_tuple(baselines_layer)
 
         # inputs -> these inputs are scaled
