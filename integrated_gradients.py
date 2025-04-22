@@ -432,7 +432,8 @@ class CustomIntegratedGradients(GradientAttribution):
             )
 
         if return_gradient_history:
-            return attributions, grads, alphas
+            scaled_grads = [grad * (input - baseline) for grad, input, baseline in zip(grads, inputs, baselines)]
+            return attributions, scaled_grads, alphas
         return attributions
 
     def has_convergence_delta(self) -> bool:
