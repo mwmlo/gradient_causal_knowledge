@@ -16,11 +16,11 @@ class Embedding:
     """
     Class for a continuous-valued vector embedding and its projection for the given model.
     """
-    def __init__(self, model: HookedTransformer, vector):
+    def __init__(self, model: HookedTransformer, vector: Tensor):
         self.d_model = model.cfg.d_model
         self.embedding_matrix = model.W_E
         # Continuous-valued embedding vector
-        self.vector = vector
+        self.vector = torch.nn.Parameter(vector.clone().detach())
         # Projected embedding vector (maps to model tokens)
         self.projection = nn_project(vector, self.embedding_matrix)
 
@@ -34,26 +34,25 @@ def nn_project(curr_embeds, embedding_matrix):
     Return the closest embedding in the model's vocabulary.
     Taken from "Hard Prompts Made Easy": https://github.com/YuxinWenRick/hard-prompts-made-easy/blob/main/optim_utils.py#L26
     """
-    with torch.no_grad():
-        batch_size, seq_len, d_model = curr_embeds.shape
-        
-        # Using the sentence transformers semantic search which is 
-        # a dot product exact kNN search between a set of 
-        # query vectors and a corpus of vectors
-        curr_embeds = torch.reshape(curr_embeds, (-1, d_model))
-        curr_embeds = normalize_embeddings(curr_embeds) # queries
+    batch_size, seq_len, d_model = curr_embeds.shape
+    
+    # Using the sentence transformers semantic search which is 
+    # a dot product exact kNN search between a set of 
+    # query vectors and a corpus of vectors
+    curr_embeds = torch.reshape(curr_embeds, (-1, d_model))
+    curr_embeds = normalize_embeddings(curr_embeds) # queries
 
-        norm_embedding_matrix = normalize_embeddings(embedding_matrix)
-        
-        hits = semantic_search(curr_embeds, norm_embedding_matrix, 
-                                query_chunk_size=curr_embeds.shape[0], 
-                                top_k=1,
-                                score_function=dot_score)
-        
-        nn_indices = torch.tensor([hit[0]["corpus_id"] for hit in hits], device=curr_embeds.device)
+    norm_embedding_matrix = normalize_embeddings(embedding_matrix)
+    
+    hits = semantic_search(curr_embeds, norm_embedding_matrix, 
+                            query_chunk_size=curr_embeds.shape[0], 
+                            top_k=1,
+                            score_function=dot_score)
+    
+    nn_indices = torch.tensor([hit[0]["corpus_id"] for hit in hits], device=curr_embeds.device)
 
-        projected_embeds = embedding_matrix[nn_indices]
-        projected_embeds = projected_embeds.reshape((batch_size, seq_len, d_model))
+    projected_embeds = embedding_matrix[nn_indices]
+    projected_embeds = projected_embeds.reshape((batch_size, seq_len, d_model))
 
     return projected_embeds
 
@@ -79,24 +78,32 @@ def run_from_layer_fn(model, original_input, patch_layer, patch_input, reset_hoo
     return logits
 
 
+def map_projection_to_string(model: HookedTransformer, projection_embedding: Tensor):
+    logits = model.unembed(projection_embedding) # Shape [batch, seq_len, d_vocab]
+    tokens = torch.argmax(logits, dim=-1) # Shape [batch, seq_len]
+    return model.to_string(tokens)
+
+
 def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding], target_layer, target_index):
     x, y = contrastive_pair
     target_layer_name = target_layer.name
 
-    is_target = lambda name: name == target_layer_name
+    x_input_str = map_projection_to_string(model, x.projection)
+    y_input_str = map_projection_to_string(model, y.projection)
+
     (x_logits, x_ce_loss), x_cache = \
-        model.run_with_cache(x.projection, return_type="both", names_filter=is_target)
+        model.run_with_cache(x_input_str, return_type="both", names_filter=[target_layer_name])
+
     # Treat x as the "clean" input - as such, its top token is the "correct" answer 
-    answer_x_logit, answer_idx = torch.max(x_logits[0, -1])
+    answer_x_logit, answer_idx = x_logits[0, -1].max(dim=-1)
     
     (_, y_ce_loss), y_cache = \
-        model.run_with_cache(y.projection, return_type="both", names_filter=is_target)
+        model.run_with_cache(y_input_str, return_type="both", names_filter=[target_layer_name])
 
     component_y_input = x_cache[target_layer_name].clone()
     component_y_input[:, :, target_index] = y_cache[target_layer_name][:, :, target_index]
 
-    model.reset_hooks()
-    y_logits = run_from_layer_fn(model, x.projection, target_layer, component_y_input, reset_hooks_end=False)
+    y_logits = run_from_layer_fn(model, x_input_str, target_layer, component_y_input, reset_hooks_end=False)
     answer_y_logit = y_logits[0, -1, answer_idx]
 
     return answer_x_logit, answer_y_logit, x_ce_loss, y_ce_loss, answer_idx
@@ -109,37 +116,51 @@ def compute_similarity(contrastive_pair):
 
 
 def counterfactuals(start_input: str, model: HookedTransformer, target_layer: HookPoint, target_index: int, iterations=100):
+    # Explicitly calculate and expose the result for each attention head
+    model.set_use_attn_result(True)
+    model.set_use_hook_mlp_in(True)
+    
     # Initialise contrastive pair
     start_tokens = model.to_tokens(start_input)
     start_embed = model.embed(start_tokens)
     
     x = Embedding(model, start_embed)
     y = Embedding(model, start_embed)
-    contrastive_pair = torch.tensor([x, y], requires_grad=True)
+    # Optimise over the raw vector values, not the projections
+    contrastive_embeddings = (x, y)
+    params = [x.vector, y.vector]
 
-    optimizer = torch.optim.AdamW(contrastive_pair)
+    optimizer = torch.optim.AdamW(params)
     aggregator = MGDA()
 
-    # Gradient descent
+    # Discrete gradient descent
     for step in range(iterations):
+        torch.set_grad_enabled(True)
 
         answer_x_logit, answer_y_logit, x_ce_loss, y_ce_loss, answer_token = \
-            compute_outputs(model, contrastive_pair, target_layer, target_index)
+            compute_outputs(model, contrastive_embeddings, target_layer, target_index)
         
         print(f"Correct answer: {model.to_string(answer_token)}")
 
         output_diff = answer_x_logit - answer_y_logit
-        output_grads = torch.autograd.grad(output_diff, contrastive_pair)[0]
+        output_grads = torch.autograd.grad(output_diff, x.projection, create_graph=True)[0]
 
-        input_similarity = compute_similarity(contrastive_pair)
+        print(output_grads.shape)
+        
+        input_similarity = compute_similarity(contrastive_embeddings)
         negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
 
         losses = [output_diff, output_grads, input_similarity, negative_perplexity]
         print(f"Losses: {losses}")
 
         optimizer.zero_grad()
-        backward(losses=losses, aggregator=aggregator)
+        # Calculate gradients with respect to projected embeddings
+        backward(losses=losses, aggregator=aggregator, inputs=[x.projection, y.projection])
+        # Apply gradient to continuous embeddings
         optimizer.step()
 
-    x, y = contrastive_pair
-    return x.projection, y.projection
+    x, y = contrastive_embeddings
+    x_cf = map_projection_to_string(x)
+    y_cf = map_projection_to_string(y)
+    model.reset_hooks()
+    return x_cf, y_cf
