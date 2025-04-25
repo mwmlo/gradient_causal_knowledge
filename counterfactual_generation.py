@@ -85,11 +85,13 @@ def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding],
     target_layer_name = target_layer.name
 
     is_target = lambda name: name == target_layer_name
-    x_logits, x_cache = model.run_with_cache(x.projection, names_filter=is_target)
+    (x_logits, x_ce_loss), x_cache = \
+        model.run_with_cache(x.projection, return_type="both", names_filter=is_target)
     # Treat x as the "clean" input - as such, its top token is the "correct" answer 
     answer_x_logit, answer_idx = torch.max(x_logits[0, -1])
     
-    _, y_cache = model.run_with_cache(y.projection, names_filter=is_target)
+    (_, y_ce_loss), y_cache = \
+        model.run_with_cache(y.projection, return_type="both", names_filter=is_target)
 
     component_y_input = x_cache[target_layer_name].clone()
     component_y_input[:, :, target_index] = y_cache[target_layer_name][:, :, target_index]
@@ -98,24 +100,13 @@ def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding],
     y_logits = run_from_layer_fn(model, x.projection, target_layer, component_y_input, reset_hooks_end=False)
     answer_y_logit = y_logits[0, -1, answer_idx]
 
-    return answer_x_logit, answer_y_logit, answer_idx
+    return answer_x_logit, answer_y_logit, x_ce_loss, y_ce_loss, answer_idx
 
-
-def compute_output_diff(answer_x_logit, answer_y_logit):
-    pass
-
-def compute_output_grads(model, contrastive_pair):
-    x, y = contrastive_pair
-    pass
 
 def compute_similarity(contrastive_pair):
     x, y = contrastive_pair
     cosine_similarity_loss = CosineSimilarity(dim=-1)
     return cosine_similarity_loss(x.projection, y.projection)
-
-def compute_perplexity(contrastive_pair):
-    x, y = contrastive_pair
-    pass
 
 
 def counterfactuals(start_input: str, model: HookedTransformer, target_layer: HookPoint, target_index: int, iterations=100):
@@ -131,17 +122,22 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
     # Gradient descent
     for step in range(iterations):
 
-        answer_x_logit, answer_y_logit, answer_idx = compute_outputs(model, contrastive_pair, target_layer, target_index)
+        answer_x_logit, answer_y_logit, x_ce_loss, y_ce_loss, answer_token = \
+            compute_outputs(model, contrastive_pair, target_layer, target_index)
+        
+        print(f"Correct answer: {model.to_string(answer_token)}")
 
         output_diff = answer_x_logit - answer_y_logit
-        output_grads = compute_output_grads(model, contrastive_pair)
+        output_grads = torch.autograd.grad(output_diff, contrastive_pair)[0]
 
         input_similarity = compute_similarity(contrastive_pair)
-        negative_perplexity = - compute_perplexity(contrastive_pair)
+        negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
+
+        losses = [output_diff, output_grads, input_similarity, negative_perplexity]
+        print(f"Losses: {losses}")
 
         optimizer.zero_grad()
-        backward(losses=[output_diff, output_grads, input_similarity, negative_perplexity],
-                 aggregator=aggregator)
+        backward(losses=losses, aggregator=aggregator)
         optimizer.step()
 
     x, y = contrastive_pair
