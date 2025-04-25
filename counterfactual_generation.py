@@ -16,18 +16,17 @@ class Embedding:
     """
     Class for a continuous-valued vector embedding and its projection for the given model.
     """
-    def __init__(self, model: HookedTransformer, vector, project_fn):
+    def __init__(self, model: HookedTransformer, vector):
         self.d_model = model.cfg.d_model
         self.embedding_matrix = model.W_E
-        self.project_fn = project_fn
         # Continuous-valued embedding vector
         self.vector = vector
         # Projected embedding vector (maps to model tokens)
-        self.projection = project_fn(vector, self.embedding_matrix)
+        self.projection = nn_project(vector, self.embedding_matrix)
 
     def update(self, new_vector):
         self.vector = new_vector
-        self.projection = self.project_fn(new_vector, self.embedding_matrix)
+        self.projection = nn_project(new_vector, self.embedding_matrix)
 
 
 def nn_project(curr_embeds, embedding_matrix):
@@ -41,7 +40,7 @@ def nn_project(curr_embeds, embedding_matrix):
         # Using the sentence transformers semantic search which is 
         # a dot product exact kNN search between a set of 
         # query vectors and a corpus of vectors
-        curr_embeds = curr_embeds.reshape((-1, d_model))
+        curr_embeds = torch.reshape(curr_embeds, (-1, d_model))
         curr_embeds = normalize_embeddings(curr_embeds) # queries
 
         norm_embedding_matrix = normalize_embeddings(embedding_matrix)
@@ -52,8 +51,8 @@ def nn_project(curr_embeds, embedding_matrix):
                                 score_function=dot_score)
         
         nn_indices = torch.tensor([hit[0]["corpus_id"] for hit in hits], device=curr_embeds.device)
-        projected_embeds = torch.gather(input=embedding_matrix, dim=0, index=nn_indices)
 
+        projected_embeds = embedding_matrix[nn_indices]
         projected_embeds = projected_embeds.reshape((batch_size, seq_len, d_model))
 
     return projected_embeds
@@ -112,8 +111,10 @@ def compute_similarity(contrastive_pair):
 def counterfactuals(start_input: str, model: HookedTransformer, target_layer: HookPoint, target_index: int, iterations=100):
     # Initialise contrastive pair
     start_tokens = model.to_tokens(start_input)
-    x = Embedding(model, start_tokens, nn_project)
-    y = Embedding(model, start_tokens, nn_project)
+    start_embed = model.embed(start_tokens)
+    
+    x = Embedding(model, start_embed)
+    y = Embedding(model, start_embed)
     contrastive_pair = torch.tensor([x, y], requires_grad=True)
 
     optimizer = torch.optim.AdamW(contrastive_pair)
