@@ -1,4 +1,8 @@
 import torch
+from torch import Tensor
+from torch.nn import CosineSimilarity
+from torchjd.aggregation import MGDA
+from torchjd import backward
 import numpy as np
 
 from transformer_lens.utils import get_act_name, get_device
@@ -9,18 +13,21 @@ from sentence_transformers.util import semantic_search, normalize_embeddings, do
 
 
 class Embedding:
-
-    def __init__(self, d_embed, project_fn, vector):
-        self.d_embed = d_embed
+    """
+    Class for a continuous-valued vector embedding and its projection for the given model.
+    """
+    def __init__(self, model: HookedTransformer, vector, project_fn):
+        self.d_model = model.cfg.d_model
+        self.embedding_matrix = model.W_E
         self.project_fn = project_fn
         # Continuous-valued embedding vector
         self.vector = vector
         # Projected embedding vector (maps to model tokens)
-        self.projection = project_fn(vector)
+        self.projection = project_fn(vector, self.embedding_matrix)
 
     def update(self, new_vector):
         self.vector = new_vector
-        self.projection = self.project_fn(new_vector)
+        self.projection = self.project_fn(new_vector, self.embedding_matrix)
 
 
 def nn_project(curr_embeds, embedding_matrix):
@@ -49,9 +56,93 @@ def nn_project(curr_embeds, embedding_matrix):
 
         projected_embeds = projected_embeds.reshape((batch_size, seq_len, d_model))
 
-    return projected_embeds, nn_indices
+    return projected_embeds
 
 
-def counterfactuals(baseline: str, model: HookedTransformer, target_component: HookPoint):
+def run_from_layer_fn(model, original_input, patch_layer, patch_input, reset_hooks_end=True):
+    """
+    Run the model, patching in `patch_input` at the target layer.
+    """
+    
+    # Do not backpropagate before the target layer
+    torch.set_grad_enabled(False)
+
+    def fwd_hook(act, hook):
+        torch.set_grad_enabled(True)
+        patch_input.requires_grad = True
+        return patch_input
+    
+    logits = model.run_with_hooks(
+        original_input,
+        fwd_hooks=[(patch_layer.name, fwd_hook)],
+        reset_hooks_end=reset_hooks_end
+    )
+    return logits
+
+
+def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding], target_layer, target_index):
+    x, y = contrastive_pair
+    target_layer_name = target_layer.name
+
+    is_target = lambda name: name == target_layer_name
+    x_logits, x_cache = model.run_with_cache(x.projection, names_filter=is_target)
+    # Treat x as the "clean" input - as such, its top token is the "correct" answer 
+    answer_x_logit, answer_idx = torch.max(x_logits[0, -1])
+    
+    _, y_cache = model.run_with_cache(y.projection, names_filter=is_target)
+
+    component_y_input = x_cache[target_layer_name].clone()
+    component_y_input[:, :, target_index] = y_cache[target_layer_name][:, :, target_index]
+
+    model.reset_hooks()
+    y_logits = run_from_layer_fn(model, x.projection, target_layer, component_y_input, reset_hooks_end=False)
+    answer_y_logit = y_logits[0, -1, answer_idx]
+
+    return answer_x_logit, answer_y_logit, answer_idx
+
+
+def compute_output_diff(answer_x_logit, answer_y_logit):
+    pass
+
+def compute_output_grads(model, contrastive_pair):
+    x, y = contrastive_pair
+    pass
+
+def compute_similarity(contrastive_pair):
+    x, y = contrastive_pair
+    cosine_similarity_loss = CosineSimilarity(dim=-1)
+    return cosine_similarity_loss(x.projection, y.projection)
+
+def compute_perplexity(contrastive_pair):
+    x, y = contrastive_pair
+    pass
+
+
+def counterfactuals(start_input: str, model: HookedTransformer, target_layer: HookPoint, target_index: int, iterations=100):
     # Initialise contrastive pair
-    x, y = Embedding(model.cfg.d_model, )
+    start_tokens = model.to_tokens(start_input)
+    x = Embedding(model, start_tokens, nn_project)
+    y = Embedding(model, start_tokens, nn_project)
+    contrastive_pair = torch.tensor([x, y], requires_grad=True)
+
+    optimizer = torch.optim.AdamW(contrastive_pair)
+    aggregator = MGDA()
+
+    # Gradient descent
+    for step in range(iterations):
+
+        answer_x_logit, answer_y_logit, answer_idx = compute_outputs(model, contrastive_pair, target_layer, target_index)
+
+        output_diff = answer_x_logit - answer_y_logit
+        output_grads = compute_output_grads(model, contrastive_pair)
+
+        input_similarity = compute_similarity(contrastive_pair)
+        negative_perplexity = - compute_perplexity(contrastive_pair)
+
+        optimizer.zero_grad()
+        backward(losses=[output_diff, output_grads, input_similarity, negative_perplexity],
+                 aggregator=aggregator)
+        optimizer.step()
+
+    x, y = contrastive_pair
+    return x.projection, y.projection
