@@ -3,10 +3,8 @@ from torch import Tensor
 from torch.nn import CosineSimilarity
 from torchjd.aggregation import MGDA
 from torchjd import backward
-import numpy as np
 
-from transformer_lens.utils import get_act_name, get_device
-from transformer_lens import ActivationCache, HookedTransformer, HookedTransformerConfig
+from transformer_lens import HookedTransformer
 from transformer_lens.hook_points import HookPoint
 
 from sentence_transformers.util import semantic_search, normalize_embeddings, dot_score
@@ -24,10 +22,6 @@ class Embedding:
         # Projected embedding vector (maps to model tokens)
         self.projection = nn_project(vector, self.embedding_matrix)
         self.projection = self.projection.detach().clone().requires_grad_(True)
-
-    def update(self, new_vector):
-        self.vector.data = new_vector
-        self.projection = nn_project(new_vector, self.embedding_matrix)
 
 
 def nn_project(curr_embeds, embedding_matrix):
@@ -101,7 +95,6 @@ def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding],
 
     # Treat x as the "clean" input - as such, its top token is the "correct" answer 
     answer_x_logit, answer_idx = x_logits[0, -1].max(dim=-1)
-    # print("x.projection -> answer_x_logit", torch.autograd.grad(answer_x_logit, x.projection, retain_graph=True))
     
     _, y_cache = run_model_with_cache(model, target_layer_name, y.projection, start_at_layer=0)
 
@@ -110,9 +103,6 @@ def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding],
 
     y_logits = run_from_layer_fn(model, x.projection, target_layer, component_y_input, reset_hooks_end=False, start_at_layer=0)
     answer_y_logit = y_logits[0, -1, answer_idx]
-
-    # print("y.projection -> y_cache", torch.autograd.grad(y_cache[target_layer_name], y.projection, retain_graph=True))
-    # print("y.projection -> answer_y_logit", torch.autograd.grad(answer_y_logit, y.projection, retain_graph=True))
 
     return answer_x_logit, answer_y_logit, answer_idx
 
@@ -134,9 +124,6 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
     start_tokens = model.to_tokens(start_input)
     start_embed = model.embed(start_tokens)
 
-    print(start_embed.shape)
-    print(model.pos_embed(start_tokens).shape)
-
     torch.set_grad_enabled(True)
     
     x = Embedding(model, start_embed)
@@ -153,17 +140,18 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
 
         print(f"Correct answer: {model.to_string(answer_token)}")
 
-        output_diff = answer_x_logit - answer_y_logit
+        output_diff = (answer_x_logit - answer_y_logit).unsqueeze(0)
         print(f"Output diff: {output_diff}")
 
         output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], retain_graph=True)
+        output_grads = torch.stack(list(output_grads)) # Shape [2, batch, seq_len, d_model]
 
         input_similarity = compute_similarity(contrastive_embeddings)
         # TODO: calculate PPL without using losses
         # negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
 
         losses = [output_diff, output_grads, input_similarity]
-        print(f"Losses: {losses}")
+        print(f"Losses: {output_diff.shape, output_grads.shape, input_similarity.shape}")
 
         optimizer.zero_grad()
         # Calculate gradients with respect to projected embeddings
