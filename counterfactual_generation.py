@@ -3,9 +3,11 @@ from torch import Tensor
 from torch.nn import CosineSimilarity
 from torchjd.aggregation import MGDA
 from torchjd import backward
+from tqdm import tqdm
 
 from transformer_lens import HookedTransformer
 from transformer_lens.hook_points import HookPoint
+from transformer_lens.utils import get_device
 
 from sentence_transformers.util import semantic_search, normalize_embeddings, dot_score
 
@@ -20,8 +22,8 @@ class Embedding:
         # Continuous-valued embedding vector
         self.vector = vector.clone().detach().requires_grad_(True)
         # Projected embedding vector (maps to model tokens)
-        self.projection = nn_project(vector, self.embedding_matrix)
-        self.projection = self.projection.detach().clone().requires_grad_(True)
+        self.projection = nn_project(vector, self.embedding_matrix).detach().requires_grad_(True)
+        # self.projection = self.projection.detach().clone().requires_grad_(True)
 
 
 def nn_project(curr_embeds, embedding_matrix):
@@ -80,7 +82,7 @@ def run_from_layer_fn(model: HookedTransformer, original_input, patch_layer, pat
 
 
 def map_projection_to_string(model: HookedTransformer, projection_embedding: Tensor):
-    with torch.enable_grad():
+    with torch.no_grad():
         logits = model.unembed(projection_embedding) # Shape [batch, seq_len, d_vocab]
         tokens = torch.argmax(logits, dim=-1) # Shape [batch, seq_len]
         print("Map tokens", tokens.shape)
@@ -118,8 +120,6 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
     model.set_use_attn_result(True)
     model.set_use_hook_mlp_in(True)
 
-    model.reset_hooks()
-
     # Initialise contrastive pair
     start_tokens = model.to_tokens(start_input)
     start_embed = model.embed(start_tokens)
@@ -134,7 +134,9 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
     aggregator = MGDA()
 
     # Discrete gradient descent
-    for step in range(iterations):
+    for step in tqdm(range(iterations)):
+        model.reset_hooks()
+
         answer_x_logit, answer_y_logit, answer_token = \
             compute_outputs(model, contrastive_embeddings, target_layer, target_index)
 
@@ -143,28 +145,28 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         output_diff = (answer_x_logit - answer_y_logit).unsqueeze(0)
         print(f"Output diff: {output_diff}")
 
-        output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], create_graph=True)
-        output_grads = torch.stack(list(output_grads)) # Shape [2, batch, seq_len, d_model]
+        # TODO: approximate instead of storing duplicate graph
+        # output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], create_graph=True)
+        # output_grads = torch.stack(list(output_grads)) # Shape [2, batch, seq_len, d_model]
 
         input_similarity = compute_similarity(contrastive_embeddings)
         # TODO: calculate PPL without using losses
         # negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
 
-        losses = [output_diff, output_grads, input_similarity]
-        print(f"Losses: {output_diff.shape, output_grads.shape, input_similarity.shape}")
-
-        print(output_diff.grad_fn, output_grads.grad_fn, input_similarity.grad_fn)
+        # losses = [output_diff, output_grads, input_similarity]
+        # print(f"Losses: {output_diff.shape, output_grads.shape, input_similarity.shape}")
+        losses = [output_diff, input_similarity]
 
         optimizer.zero_grad()
         # Calculate gradients with respect to projected embeddings
-        print(x.projection.requires_grad, y.projection.requires_grad)
-        print(x.projection.grad_fn, y.projection.grad_fn)
-        backward(tensors=losses, aggregator=aggregator, inputs=[x.projection, y.projection])
+        backward(tensors=-output_diff, aggregator=aggregator, inputs=[x.projection, y.projection])
         # Apply gradient to continuous embeddings
         optimizer.step()
 
+        torch.mps.empty_cache()
+
     x, y = contrastive_embeddings
-    x_cf = map_projection_to_string(x)
-    y_cf = map_projection_to_string(y)
+    x_cf = map_projection_to_string(model, x.vector)
+    y_cf = map_projection_to_string(model, y.vector)
     model.reset_hooks()
     return x_cf, y_cf
