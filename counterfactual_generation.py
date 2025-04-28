@@ -143,7 +143,7 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         output_diff = (answer_x_logit - answer_y_logit).unsqueeze(0)
         print(f"Output diff: {output_diff}")
 
-        output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], retain_graph=True)
+        output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], create_graph=True)
         output_grads = torch.stack(list(output_grads)) # Shape [2, batch, seq_len, d_model]
 
         input_similarity = compute_similarity(contrastive_embeddings)
@@ -153,8 +153,12 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         losses = [output_diff, output_grads, input_similarity]
         print(f"Losses: {output_diff.shape, output_grads.shape, input_similarity.shape}")
 
+        print(output_diff.grad_fn, output_grads.grad_fn, input_similarity.grad_fn)
+
         optimizer.zero_grad()
         # Calculate gradients with respect to projected embeddings
+        print(x.projection.requires_grad, y.projection.requires_grad)
+        print(x.projection.grad_fn, y.projection.grad_fn)
         backward(tensors=losses, aggregator=aggregator, inputs=[x.projection, y.projection])
         # Apply gradient to continuous embeddings
         optimizer.step()
