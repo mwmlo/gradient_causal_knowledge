@@ -58,6 +58,19 @@ def nn_project(curr_embeds, embedding_matrix):
     return projected_embeds
 
 
+def run_model_with_cache(model: HookedTransformer, target_layer_name, *model_args, **model_kwargs):
+    cache = {}
+    
+    def save_acts_hook_with_grad(act, hook):
+        cache[hook.name] = act  # No detach!
+        return act
+    
+    with model.hooks(fwd_hooks=[(target_layer_name, save_acts_hook_with_grad)]):
+        logits = model.forward(*model_args, **model_kwargs)
+
+    return logits, cache
+
+
 def run_from_layer_fn(model: HookedTransformer, original_input, patch_layer, patch_input, reset_hooks_end=True, start_at_layer=None):
     """
     Run the model, patching in `patch_input` at the target layer.
@@ -67,10 +80,9 @@ def run_from_layer_fn(model: HookedTransformer, original_input, patch_layer, pat
         return patch_input + 0 * act
     
     with model.hooks(fwd_hooks=[(patch_layer.name, fwd_hook)], reset_hooks_end=reset_hooks_end):
-        logits, cache = model.run_with_cache(original_input, start_at_layer=start_at_layer)
-        print()
+        logits = model.forward(original_input, start_at_layer=start_at_layer)
     
-    return logits, cache
+    return logits
 
 
 def map_projection_to_string(model: HookedTransformer, projection_embedding: Tensor):
@@ -85,25 +97,22 @@ def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding],
     x, y = contrastive_pair
     target_layer_name = target_layer.name
     
-    x_logits, x_cache = \
-        model.run_with_cache(x.projection, start_at_layer=0, names_filter=[target_layer_name])
+    x_logits, x_cache = run_model_with_cache(model, target_layer_name, x.projection, start_at_layer=0)
 
     # Treat x as the "clean" input - as such, its top token is the "correct" answer 
     answer_x_logit, answer_idx = x_logits[0, -1].max(dim=-1)
     # print("x.projection -> answer_x_logit", torch.autograd.grad(answer_x_logit, x.projection, retain_graph=True))
     
-    print(y.projection.requires_grad)
-    _, y_cache = model.run_with_cache(y.projection, start_at_layer=0, names_filter=[target_layer_name])
-    print(y_cache[target_layer_name].requires_grad)
+    _, y_cache = run_model_with_cache(model, target_layer_name, y.projection, start_at_layer=0)
 
     component_y_input = x_cache[target_layer_name].clone()
     component_y_input[:, :, target_index] = y_cache[target_layer_name][:, :, target_index]
 
-    y_logits, _ = run_from_layer_fn(model, x.projection, target_layer, component_y_input, reset_hooks_end=False, start_at_layer=0)
+    y_logits = run_from_layer_fn(model, x.projection, target_layer, component_y_input, reset_hooks_end=False, start_at_layer=0)
     answer_y_logit = y_logits[0, -1, answer_idx]
 
-    print("y.projection -> y_cache", torch.autograd.grad(y_cache[target_layer_name][0,0,target_index], y.projection, retain_graph=True))
-    print("y.projection -> answer_y_logit", torch.autograd.grad(answer_y_logit, y.projection, retain_graph=True))
+    # print("y.projection -> y_cache", torch.autograd.grad(y_cache[target_layer_name], y.projection, retain_graph=True))
+    # print("y.projection -> answer_y_logit", torch.autograd.grad(answer_y_logit, y.projection, retain_graph=True))
 
     return answer_x_logit, answer_y_logit, answer_idx
 
