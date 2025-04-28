@@ -23,6 +23,7 @@ class Embedding:
         self.vector = vector.clone().detach().requires_grad_(True)
         # Projected embedding vector (maps to model tokens)
         self.projection = nn_project(vector, self.embedding_matrix)
+        self.projection = self.projection.detach().clone().requires_grad_(True)
 
     def update(self, new_vector):
         self.vector.data = new_vector
@@ -57,59 +58,54 @@ def nn_project(curr_embeds, embedding_matrix):
     return projected_embeds
 
 
-def run_from_layer_fn(model, original_input, patch_layer, patch_input, reset_hooks_end=True):
+def run_from_layer_fn(model: HookedTransformer, original_input, patch_layer, patch_input, reset_hooks_end=True, start_at_layer=None):
     """
     Run the model, patching in `patch_input` at the target layer.
     """
-
     def fwd_hook(act, hook):
-        patch_input.requires_grad = True
-        return patch_input
+        # Keep patch_input in the computational graph
+        return patch_input + 0 * act
     
-    logits, loss = model.run_with_hooks(
-        original_input,
-        return_type="both",
-        fwd_hooks=[(patch_layer.name, fwd_hook)],
-        reset_hooks_end=reset_hooks_end
-    )
-    return logits, loss
+    with model.hooks(fwd_hooks=[(patch_layer.name, fwd_hook)], reset_hooks_end=reset_hooks_end):
+        logits, cache = model.run_with_cache(original_input, start_at_layer=start_at_layer)
+        print()
+    
+    return logits, cache
 
 
 def map_projection_to_string(model: HookedTransformer, projection_embedding: Tensor):
-    logits = model.unembed(projection_embedding) # Shape [batch, seq_len, d_vocab]
-    tokens = torch.argmax(logits, dim=-1) # Shape [batch, seq_len]
-    return model.to_string(tokens)
+    with torch.enable_grad():
+        logits = model.unembed(projection_embedding) # Shape [batch, seq_len, d_vocab]
+        tokens = torch.argmax(logits, dim=-1) # Shape [batch, seq_len]
+        print("Map tokens", tokens.shape)
+        return model.to_string(tokens)
 
 
 def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding], target_layer, target_index):
     x, y = contrastive_pair
     target_layer_name = target_layer.name
-
-    x_input_str = map_projection_to_string(model, x.projection)
-    y_input_str = map_projection_to_string(model, y.projection)
-
-    print(x.projection.shape)
-
-    (x_logits, x_ce_loss), x_cache = \
-        model.run_with_cache(x_input_str, return_type="both", names_filter=[target_layer_name], reset_hooks_end=False)
-
-    print(x_logits.shape)
-    print("1", torch.autograd.grad(x_logits.mean(), x.projection, retain_graph=True))
-
-    print("2", x_logits.grad_fn)
+    
+    x_logits, x_cache = \
+        model.run_with_cache(x.projection, start_at_layer=0, names_filter=[target_layer_name])
 
     # Treat x as the "clean" input - as such, its top token is the "correct" answer 
     answer_x_logit, answer_idx = x_logits[0, -1].max(dim=-1)
+    # print("x.projection -> answer_x_logit", torch.autograd.grad(answer_x_logit, x.projection, retain_graph=True))
     
-    _, y_cache = model.run_with_cache(y_input_str, return_type="both", names_filter=[target_layer_name])
+    print(y.projection.requires_grad)
+    _, y_cache = model.run_with_cache(y.projection, start_at_layer=0, names_filter=[target_layer_name])
+    print(y_cache[target_layer_name].requires_grad)
 
     component_y_input = x_cache[target_layer_name].clone()
     component_y_input[:, :, target_index] = y_cache[target_layer_name][:, :, target_index]
 
-    y_logits, y_ce_loss = run_from_layer_fn(model, x_input_str, target_layer, component_y_input, reset_hooks_end=False)
+    y_logits, _ = run_from_layer_fn(model, x.projection, target_layer, component_y_input, reset_hooks_end=False, start_at_layer=0)
     answer_y_logit = y_logits[0, -1, answer_idx]
 
-    return answer_x_logit, answer_y_logit, x_ce_loss, y_ce_loss, answer_idx
+    print("y.projection -> y_cache", torch.autograd.grad(y_cache[target_layer_name][0,0,target_index], y.projection, retain_graph=True))
+    print("y.projection -> answer_y_logit", torch.autograd.grad(answer_y_logit, y.projection, retain_graph=True))
+
+    return answer_x_logit, answer_y_logit, answer_idx
 
 
 def compute_similarity(contrastive_pair):
@@ -123,9 +119,14 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
     model.set_use_attn_result(True)
     model.set_use_hook_mlp_in(True)
 
+    model.reset_hooks()
+
     # Initialise contrastive pair
-    start_embed = model.input_to_embed(start_input)[0]
+    start_tokens = model.to_tokens(start_input)
+    start_embed = model.embed(start_tokens)
+
     print(start_embed.shape)
+    print(model.pos_embed(start_tokens).shape)
 
     torch.set_grad_enabled(True)
     
@@ -136,28 +137,23 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
     optimizer = torch.optim.AdamW([x.vector, y.vector])
     aggregator = MGDA()
 
-    print("0", x.projection.grad_fn)
-
     # Discrete gradient descent
     for step in range(iterations):
-        answer_x_logit, answer_y_logit, x_ce_loss, y_ce_loss, answer_token = \
+        answer_x_logit, answer_y_logit, answer_token = \
             compute_outputs(model, contrastive_embeddings, target_layer, target_index)
-        
-        print(answer_x_logit.grad_fn)
-        print(answer_y_logit.grad_fn)
 
         print(f"Correct answer: {model.to_string(answer_token)}")
 
         output_diff = answer_x_logit - answer_y_logit
-
         print(f"Output diff: {output_diff}")
 
         output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], retain_graph=True)
 
         input_similarity = compute_similarity(contrastive_embeddings)
-        negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
+        # TODO: calculate PPL without using losses
+        # negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
 
-        losses = [output_diff, output_grads, input_similarity, negative_perplexity]
+        losses = [output_diff, output_grads, input_similarity]
         print(f"Losses: {losses}")
 
         optimizer.zero_grad()
