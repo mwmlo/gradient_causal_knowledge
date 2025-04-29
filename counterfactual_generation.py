@@ -157,23 +157,23 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         output_diff = (answer_x_logit - answer_y_logit).unsqueeze(0)
         print(f"Output logit diff: {output_diff}")
 
-        # answer_x_embed, answer_y_embed = model.embed(answer_x_idx), model.embed(answer_y_idx)
-        # output_similarity = compute_similarity(answer_x_embed, answer_y_embed)
-        # print(f"Output similarity: {output_similarity}")
+        answer_x_embed, answer_y_embed = model.embed(answer_x_idx), model.embed(answer_y_idx)
+        output_sem_sim = compute_similarity(answer_x_embed, answer_y_embed)
+        print(f"Output semantic similarity: {output_sem_sim}")
 
         # TODO: approximate instead of storing duplicate graph
         # output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], create_graph=True)
         # output_grads = torch.stack(list(output_grads)) # Shape [2, batch, seq_len, d_model]
 
-        input_sim = compute_similarity(x.projection, y.projection)
-        print(f"Input similarity: {input_sim}")
+        # input_sim = compute_similarity(x.projection, y.projection)
+        # print(f"Input similarity: {input_sim}")
         # TODO: calculate PPL without using losses
         # negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
 
         # losses = [output_diff, output_grads, input_similarity]
         # print(f"Losses: {output_diff.shape, output_grads.shape, input_similarity.shape}")
-        losses = [output_diff, input_sim]
-        loss = 0.7 * output_diff + 0.3 * input_sim
+        # losses = [output_diff, input_sim]
+        losses = [output_diff, output_sem_sim]
 
         print(x.vector)
 
