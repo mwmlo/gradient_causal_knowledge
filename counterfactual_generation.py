@@ -1,5 +1,6 @@
 import torch
 from torch import Tensor
+import torch.nn.functional as F
 from torch.nn import CosineSimilarity
 from torchjd.aggregation import MGDA, UPGrad
 from torchjd import backward
@@ -85,10 +86,16 @@ def run_from_layer_fn(model: HookedTransformer, original_input, patch_layer, pat
     return logits, loss
 
 
-def map_projection_to_string(model: HookedTransformer, projection_embedding: Tensor):
-    with torch.no_grad():
-        logits = model.unembed(projection_embedding) # Shape [batch, seq_len, d_vocab]
-        tokens = torch.argmax(logits, dim=-1) # Shape [batch, seq_len]
+def map_projection_to_string(model: HookedTransformer, projection_embedding: Tensor, differentiable=False):
+    logits = model.unembed(projection_embedding) # Shape [batch, seq_len, d_vocab]
+    if differentiable:
+        # Differentiable alternative to argmax
+        gumbel_sample = F.gumbel_softmax(logits, tau=0.01, hard=False, dim=-1)
+        token_indices = torch.arange(0, model.cfg.d_vocab_out).float() # Shape [d_vocab,]
+        tokens = gumbel_sample @ token_indices
+        return tokens, None
+    else:
+        tokens = torch.argmax(logits, dim=-1)
         return tokens, model.to_string(tokens)
 
 
@@ -123,6 +130,17 @@ def compute_similarity(a, b):
     return cosine_similarity_loss(a, b).mean()
 
 
+def compute_tokens_changed(model: HookedTransformer, contrastive_pair: list[Embedding]):
+    x, y = contrastive_pair
+    input_x_tokens, _ = map_projection_to_string(model, x.projection, differentiable=True)
+    input_y_tokens, _ = map_projection_to_string(model, y.projection, differentiable=True)
+
+    print(input_x_tokens.grad_fn)
+    
+    token_diff = input_x_tokens - input_y_tokens
+    return token_diff.mean()
+
+
 def counterfactuals(start_input: str, model: HookedTransformer, target_layer: HookPoint, target_index: int, iterations=100):
     # Explicitly calculate and expose the result for each attention head
     model.set_use_attn_result(True)
@@ -149,8 +167,6 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         x.update_projection()
         y.update_projection()
 
-        # Maximise semantic differences between outputs 
-
         answer_x_logit, answer_y_logit, answer_x_idx, answer_y_idx, x_loss, y_loss = \
             compute_outputs(model, contrastive_embeddings, target_layer, target_index)
 
@@ -169,7 +185,10 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         # output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], create_graph=True)
         # output_grads = torch.stack(list(output_grads)) # Shape [2, batch, seq_len, d_model]
 
-        input_sim = compute_similarity(x.projection, y.projection)
+
+        # "Minimal" perturbation to input: semantic similarity or input tokens modified
+        # input_sim = compute_similarity(x.projection, y.projection)
+        input_sim = compute_tokens_changed(model, contrastive_embeddings)
         print(f"Input similarity: {input_sim}")
         
         # We want to minimise perplexity, i.e. maximise negative perplexity
