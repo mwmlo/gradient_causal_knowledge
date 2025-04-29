@@ -130,15 +130,16 @@ def compute_similarity(a, b):
     return cosine_similarity_loss(a, b).mean()
 
 
-def compute_tokens_changed(model: HookedTransformer, contrastive_pair: list[Embedding]):
+def compute_tokens_unchanged(model: HookedTransformer, contrastive_pair: list[Embedding]):
     x, y = contrastive_pair
     input_x_tokens, _ = map_projection_to_string(model, x.projection, differentiable=True)
     input_y_tokens, _ = map_projection_to_string(model, y.projection, differentiable=True)
-
-    print(input_x_tokens.grad_fn)
     
+    # Differentiable way of counting number of tokens which are equal
     token_diff = input_x_tokens - input_y_tokens
-    return token_diff.mean()
+    sigma = 1.0
+    token_sim = torch.exp(-(token_diff ** 2) / (2 * sigma ** 2))
+    return torch.sum(token_sim)
 
 
 def counterfactuals(start_input: str, model: HookedTransformer, target_layer: HookPoint, target_index: int, iterations=100):
@@ -188,7 +189,7 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
 
         # "Minimal" perturbation to input: semantic similarity or input tokens modified
         # input_sim = compute_similarity(x.projection, y.projection)
-        input_sim = compute_tokens_changed(model, contrastive_embeddings)
+        input_sim = compute_tokens_unchanged(model, contrastive_embeddings)
         print(f"Input similarity: {input_sim}")
         
         # We want to minimise perplexity, i.e. maximise negative perplexity
