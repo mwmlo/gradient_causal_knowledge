@@ -11,7 +11,6 @@ from transformer_lens.utils import get_device
 
 from sentence_transformers.util import semantic_search, normalize_embeddings, dot_score
 
-
 class Embedding:
     """
     Class for a continuous-valued vector embedding and its projection for the given model.
@@ -100,7 +99,7 @@ def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding],
     x_logits, x_cache = run_model_with_cache(model, target_layer_name, x_start_residual, start_at_layer=0)
 
     # Treat x as the "clean" input - as such, its top token is the "correct" answer 
-    answer_x_logit, answer_idx = x_logits[0, -1].max(dim=-1)
+    answer_x_logit, answer_x_idx = x_logits[0, -1].max(dim=-1)
     
     y_start_residual, _ = model.get_residual(y.projection, 0)
     _, y_cache = run_model_with_cache(model, target_layer_name, y_start_residual, start_at_layer=0)
@@ -109,9 +108,10 @@ def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding],
     component_y_input[:, :, target_index] = y_cache[target_layer_name][:, :, target_index]
 
     y_logits = run_from_layer_fn(model, x_start_residual, target_layer, component_y_input, reset_hooks_end=False, start_at_layer=0)
-    answer_y_logit = y_logits[0, -1, answer_idx]
+    answer_y_logit = y_logits[0, -1, answer_x_idx]
+    _, answer_y_idx = y_logits[0, -1].max(dim=-1)
 
-    return answer_x_logit, answer_y_logit, answer_idx
+    return answer_x_logit, answer_y_logit, answer_x_idx, answer_y_idx
 
 
 def compute_similarity(a, b):
@@ -132,11 +132,11 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
     
     x = Embedding(model, start_embed)
     y = Embedding(model, start_embed)
-    # Gradient ASCENT over the raw vector values, not the projections
+    # Gradient descent over the raw vector values, not the projections
     contrastive_embeddings = (x, y)
     params = [x.vector, y.vector]
     optimizer = torch.optim.AdamW(params, maximize=True, lr=0.05)
-    # aggregator = MGDA()
+    aggregator = UPGrad()
 
     # Discrete gradient descent
     for step in range(iterations):
@@ -145,35 +145,47 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         x.update_projection()
         y.update_projection()
 
-        answer_x_logit, answer_y_logit, answer_token = \
+        # Maximise semantic differences between outputs 
+
+        answer_x_logit, answer_y_logit, answer_x_idx, answer_y_idx = \
             compute_outputs(model, contrastive_embeddings, target_layer, target_index)
 
-        print(f"Correct answer: {model.to_string(answer_token)}")
+        answer_x_token = model.to_string(answer_x_idx)
+        answer_y_token = model.to_string(answer_y_idx)
+        print(f"Outputs: {answer_x_token} vs. {answer_y_token}")
 
         output_diff = (answer_x_logit - answer_y_logit).unsqueeze(0)
-        print(f"Output diff: {output_diff}")
+        print(f"Output logit diff: {output_diff}")
+
+        # answer_x_embed, answer_y_embed = model.embed(answer_x_idx), model.embed(answer_y_idx)
+        # output_similarity = compute_similarity(answer_x_embed, answer_y_embed)
+        # print(f"Output similarity: {output_similarity}")
 
         # TODO: approximate instead of storing duplicate graph
         # output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], create_graph=True)
         # output_grads = torch.stack(list(output_grads)) # Shape [2, batch, seq_len, d_model]
 
-        input_similarity = compute_similarity(x.projection, y.projection)
-        print(f"Input similarity: {input_similarity}")
+        input_sim = compute_similarity(x.projection, y.projection)
+        print(f"Input similarity: {input_sim}")
         # TODO: calculate PPL without using losses
         # negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
 
         # losses = [output_diff, output_grads, input_similarity]
         # print(f"Losses: {output_diff.shape, output_grads.shape, input_similarity.shape}")
-        # losses = [output_diff, input_similarity]
-        loss = 0.7 * output_diff + 0.3 * input_similarity
+        losses = [output_diff, input_sim]
+        loss = 0.7 * output_diff + 0.3 * input_sim
+
+        print(x.vector)
 
         optimizer.zero_grad()
         # Calculate gradients with respect to projected embeddings
-        (x.vector.grad, y.vector.grad) = torch.autograd.grad(loss, [x.projection, y.projection])
-        # backward(tensors=losses, aggregator=aggregator, inputs=[x.projection, y.projection])
-        # x.vector.grad, y.vector.grad = x.projection.grad, y.projection.grad
+        # (x.vector.grad, y.vector.grad) = torch.autograd.grad(loss, [x.projection, y.projection])
+        backward(tensors=losses, aggregator=aggregator, inputs=[x.projection, y.projection])
+        x.vector.grad, y.vector.grad = x.projection.grad, y.projection.grad
         # Apply gradient to continuous embeddings
         optimizer.step()
+
+        print(x.vector)
 
         torch.mps.empty_cache()
 
