@@ -9,6 +9,8 @@ from transformer_lens import HookedTransformer
 from transformer_lens.hook_points import HookPoint
 from transformer_lens.utils import get_device
 
+import evaluate
+
 from sentence_transformers.util import semantic_search, normalize_embeddings, dot_score
 
 class Embedding:
@@ -64,12 +66,12 @@ def run_model_with_cache(model: HookedTransformer, target_layer_name, *model_arg
         return act
     
     with model.hooks(fwd_hooks=[(target_layer_name, save_acts_hook_with_grad)]):
-        logits = model.forward(*model_args, **model_kwargs)
+        logits, loss = model.forward(*model_args, **model_kwargs, return_type="both")
 
-    return logits, cache
+    return logits, loss, cache
 
 
-def run_from_layer_fn(model: HookedTransformer, original_input, patch_layer, patch_input, reset_hooks_end=True, start_at_layer=None):
+def run_from_layer_fn(model: HookedTransformer, original_input, patch_layer, patch_input, reset_hooks_end=True, start_at_layer=None, tokens=None):
     """
     Run the model, patching in `patch_input` at the target layer.
     """
@@ -78,40 +80,42 @@ def run_from_layer_fn(model: HookedTransformer, original_input, patch_layer, pat
         return patch_input + 0 * act
     
     with model.hooks(fwd_hooks=[(patch_layer.name, fwd_hook)], reset_hooks_end=reset_hooks_end):
-        logits = model.forward(original_input, start_at_layer=start_at_layer)
+        logits, loss = model.forward(original_input, start_at_layer=start_at_layer, return_type="both", tokens=tokens)
     
-    return logits
+    return logits, loss
 
 
 def map_projection_to_string(model: HookedTransformer, projection_embedding: Tensor):
     with torch.no_grad():
         logits = model.unembed(projection_embedding) # Shape [batch, seq_len, d_vocab]
         tokens = torch.argmax(logits, dim=-1) # Shape [batch, seq_len]
-        print("Map tokens", tokens.shape)
-        return model.to_string(tokens)
+        return tokens, model.to_string(tokens)
 
 
 def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding], target_layer, target_index):
     x, y = contrastive_pair
     target_layer_name = target_layer.name
 
+    x_tokens, _ = map_projection_to_string(model, x.projection)
+    y_tokens, _ = map_projection_to_string(model, y.projection)
+
     x_start_residual, _ = model.get_residual(x.projection, 0)
-    x_logits, x_cache = run_model_with_cache(model, target_layer_name, x_start_residual, start_at_layer=0)
+    x_logits, x_loss, x_cache = run_model_with_cache(model, target_layer_name, x_start_residual, start_at_layer=0, tokens=x_tokens)
 
     # Treat x as the "clean" input - as such, its top token is the "correct" answer 
     answer_x_logit, answer_x_idx = x_logits[0, -1].max(dim=-1)
     
     y_start_residual, _ = model.get_residual(y.projection, 0)
-    _, y_cache = run_model_with_cache(model, target_layer_name, y_start_residual, start_at_layer=0)
+    _, y_loss, y_cache = run_model_with_cache(model, target_layer_name, y_start_residual, start_at_layer=0, tokens=y_tokens)
 
     component_y_input = x_cache[target_layer_name].clone()
     component_y_input[:, :, target_index] = y_cache[target_layer_name][:, :, target_index]
 
-    y_logits = run_from_layer_fn(model, x_start_residual, target_layer, component_y_input, reset_hooks_end=False, start_at_layer=0)
+    y_logits, _ = run_from_layer_fn(model, x_start_residual, target_layer, component_y_input, reset_hooks_end=False, start_at_layer=0, tokens=y_tokens)
     answer_y_logit = y_logits[0, -1, answer_x_idx]
     _, answer_y_idx = y_logits[0, -1].max(dim=-1)
 
-    return answer_x_logit, answer_y_logit, answer_x_idx, answer_y_idx
+    return answer_x_logit, answer_y_logit, answer_x_idx, answer_y_idx, x_loss, y_loss
 
 
 def compute_similarity(a, b):
@@ -147,7 +151,7 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
 
         # Maximise semantic differences between outputs 
 
-        answer_x_logit, answer_y_logit, answer_x_idx, answer_y_idx = \
+        answer_x_logit, answer_y_logit, answer_x_idx, answer_y_idx, x_loss, y_loss = \
             compute_outputs(model, contrastive_embeddings, target_layer, target_index)
 
         answer_x_token = model.to_string(answer_x_idx)
@@ -165,17 +169,17 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         # output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], create_graph=True)
         # output_grads = torch.stack(list(output_grads)) # Shape [2, batch, seq_len, d_model]
 
-        # input_sim = compute_similarity(x.projection, y.projection)
-        # print(f"Input similarity: {input_sim}")
-        # TODO: calculate PPL without using losses
-        # negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
+        input_sim = compute_similarity(x.projection, y.projection)
+        print(f"Input similarity: {input_sim}")
+        
+        # We want to minimise perplexity, i.e. maximise negative perplexity
+        neg_ppl = -((torch.exp(x_loss) + torch.exp(y_loss)) / 2)
+        print(f"Negative perplexity: {neg_ppl}")
 
         # losses = [output_diff, output_grads, input_similarity]
         # print(f"Losses: {output_diff.shape, output_grads.shape, input_similarity.shape}")
         # losses = [output_diff, input_sim]
-        losses = [output_diff, output_sem_sim]
-
-        print(x.vector)
+        losses = [output_diff, output_sem_sim, input_sim, neg_ppl]
 
         optimizer.zero_grad()
         # Calculate gradients with respect to projected embeddings
@@ -185,12 +189,10 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         # Apply gradient to continuous embeddings
         optimizer.step()
 
-        print(x.vector)
-
         torch.mps.empty_cache()
 
     x, y = contrastive_embeddings
-    x_cf = map_projection_to_string(model, x.projection)
-    y_cf = map_projection_to_string(model, y.projection)
+    _, x_cf = map_projection_to_string(model, x.projection)
+    _, y_cf = map_projection_to_string(model, y.projection)
     model.reset_hooks()
     return x_cf, y_cf
