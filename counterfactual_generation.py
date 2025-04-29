@@ -22,14 +22,17 @@ class Embedding:
         # Continuous-valued embedding vector
         self.vector = vector.clone().detach().requires_grad_(True)
         # Projected embedding vector (maps to model tokens)
-        self.projection = nn_project(vector, self.embedding_matrix).detach().requires_grad_(True)
-        # self.projection = self.projection.detach().clone().requires_grad_(True)
+        self.projection = None
+
+    def update_projection(self):
+        # Update projection value based on current embedding vector
+        self.projection = nn_project(self.vector, self.embedding_matrix).detach().requires_grad_(True)
 
 
 def nn_project(curr_embeds, embedding_matrix):
     """
     Return the closest embedding in the model's vocabulary.
-    Taken from "Hard Prompts Made Easy": https://github.com/YuxinWenRick/hard-prompts-made-easy/blob/main/optim_utils.py#L26
+    Adapted from "Hard Prompts Made Easy": https://github.com/YuxinWenRick/hard-prompts-made-easy/blob/main/optim_utils.py#L26
     """
     batch_size, seq_len, d_model = curr_embeds.shape
     
@@ -92,18 +95,20 @@ def map_projection_to_string(model: HookedTransformer, projection_embedding: Ten
 def compute_outputs(model: HookedTransformer, contrastive_pair: list[Embedding], target_layer, target_index):
     x, y = contrastive_pair
     target_layer_name = target_layer.name
-    
-    x_logits, x_cache = run_model_with_cache(model, target_layer_name, x.projection, start_at_layer=0)
+
+    x_start_residual, _ = model.get_residual(x.projection, 0)
+    x_logits, x_cache = run_model_with_cache(model, target_layer_name, x_start_residual, start_at_layer=0)
 
     # Treat x as the "clean" input - as such, its top token is the "correct" answer 
     answer_x_logit, answer_idx = x_logits[0, -1].max(dim=-1)
     
-    _, y_cache = run_model_with_cache(model, target_layer_name, y.projection, start_at_layer=0)
+    y_start_residual, _ = model.get_residual(y.projection, 0)
+    _, y_cache = run_model_with_cache(model, target_layer_name, y_start_residual, start_at_layer=0)
 
     component_y_input = x_cache[target_layer_name].clone()
     component_y_input[:, :, target_index] = y_cache[target_layer_name][:, :, target_index]
 
-    y_logits = run_from_layer_fn(model, x.projection, target_layer, component_y_input, reset_hooks_end=False, start_at_layer=0)
+    y_logits = run_from_layer_fn(model, x_start_residual, target_layer, component_y_input, reset_hooks_end=False, start_at_layer=0)
     answer_y_logit = y_logits[0, -1, answer_idx]
 
     return answer_x_logit, answer_y_logit, answer_idx
@@ -121,21 +126,27 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
     model.set_use_hook_mlp_in(True)
 
     # Initialise contrastive pair
-    start_tokens = model.to_tokens(start_input)
+    start_tokens = model.to_tokens(start_input, prepend_bos=False)
     start_embed = model.embed(start_tokens)
 
     torch.set_grad_enabled(True)
     
     x = Embedding(model, start_embed)
     y = Embedding(model, start_embed)
-    # Optimise over the raw vector values, not the projections
+    # Gradient ASCENT over the raw vector values, not the projections
     contrastive_embeddings = (x, y)
-    optimizer = torch.optim.AdamW([x.vector, y.vector])
+    params = [x.vector, y.vector]
+    optimizer = torch.optim.AdamW(params, maximize=True, lr=0.1)
     aggregator = MGDA()
 
     # Discrete gradient descent
-    for step in tqdm(range(iterations)):
+    for step in range(iterations):
         model.reset_hooks()
+
+        x.update_projection()
+        y.update_projection()
+
+        print(torch.equal(x.vector, x.projection))
 
         answer_x_logit, answer_y_logit, answer_token = \
             compute_outputs(model, contrastive_embeddings, target_layer, target_index)
@@ -149,24 +160,26 @@ def counterfactuals(start_input: str, model: HookedTransformer, target_layer: Ho
         # output_grads = torch.autograd.grad(output_diff, [x.projection, y.projection], create_graph=True)
         # output_grads = torch.stack(list(output_grads)) # Shape [2, batch, seq_len, d_model]
 
-        input_similarity = compute_similarity(contrastive_embeddings)
+        # input_similarity = compute_similarity(contrastive_embeddings)
         # TODO: calculate PPL without using losses
         # negative_perplexity = torch.Tensor([-torch.exp(x_ce_loss), -torch.exp(y_ce_loss)])
 
         # losses = [output_diff, output_grads, input_similarity]
         # print(f"Losses: {output_diff.shape, output_grads.shape, input_similarity.shape}")
-        losses = [output_diff, input_similarity]
+        # losses = [output_diff, input_similarity]
 
         optimizer.zero_grad()
         # Calculate gradients with respect to projected embeddings
-        backward(tensors=-output_diff, aggregator=aggregator, inputs=[x.projection, y.projection])
+        # (x.vector.grad, y.vector.grad) = torch.autograd.grad(output_diff, [x.projection, y.projection])
+        backward(tensors=output_diff, aggregator=aggregator, inputs=[x.projection, y.projection])
+        x.vector.grad, y.vector.grad = x.projection.grad, y.projection.grad
         # Apply gradient to continuous embeddings
         optimizer.step()
 
         torch.mps.empty_cache()
 
     x, y = contrastive_embeddings
-    x_cf = map_projection_to_string(model, x.vector)
-    y_cf = map_projection_to_string(model, y.vector)
+    x_cf = map_projection_to_string(model, x.projection)
+    y_cf = map_projection_to_string(model, y.projection)
     model.reset_hooks()
     return x_cf, y_cf
