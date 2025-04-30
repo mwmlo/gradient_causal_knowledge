@@ -1,19 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://mwmlo.github.io/gradient_causal_knowledge/reference/[1_5_1]_Balanced_Bracket_Classifier_(solutions).html</loc>
-    <lastmod>2025-04-16T11:03:28.357Z</lastmod>
-  </url>
-  <url>
-    <loc>https://mwmlo.github.io/gradient_causal_knowledge/notebook.html</loc>
-    <lastmod>2025-04-19T01:40:46.564Z</lastmod>
+    <loc>https://mwmlo.github.io/gradient_causal_knowledge/gpt2_ig_ap.html</loc>
+    <lastmod>2025-04-30T14:48:04.740Z</lastmod>
   </url>
   <url>
     <loc>https://mwmlo.github.io/gradient_causal_knowledge/contrastive_gradients.html</loc>
-    <lastmod>2025-04-30T11:17:26.479Z</lastmod>
+    <lastmod>2025-04-30T11:21:33.768Z</lastmod>
   </url>
   <url>
-    <loc>https://mwmlo.github.io/gradient_causal_knowledge/gpt2_ig_ap.html</loc>
-    <lastmod>2025-04-30T10:55:36.774Z</lastmod>
+    <loc>https://mwmlo.github.io/gradient_causal_knowledge/toy_experiments.html</loc>
+    <lastmod>2025-04-19T01:40:46.564Z</lastmod>
   </url>
 </urlset>
