@@ -901,7 +901,7 @@ class CustomLayerIntegratedGradients(LayerAttribution, GradientAttribution):
             >>> # attribution size matches layer output, Nx12x32x32
             >>> attribution = lig.attribute(input, target=3)
         """
-        print("Running attribution!")
+        print("Running custom attribution!")
 
         inps, baselines = _format_input_baseline(inputs, baselines)
         _validate_input(inps, baselines, n_steps, method)
