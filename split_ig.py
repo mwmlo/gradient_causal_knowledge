@@ -281,30 +281,23 @@ class SplitIntegratedGradients(GradientAttribution):
             for grad in grads
         ]
 
-        # Reshape so that output has same dimensionality as inputs
-        scaled_grads = [
-            scaled_grad.reshape(((grad.shape[0] // n_steps),) + grad.shape[1:])
-            for (scaled_grad, grad) in zip(scaled_grads, grads)
-        ]
-
         # # aggregates across all steps for each tensor in the input tuple
         # # total_grads has the same dimensionality as inputs
-        # total_grads = tuple(
-        #     _reshape_and_sum(
-        #         scaled_grad, n_steps, grad.shape[0] // n_steps, grad.shape[1:]
-        #     )
-        #     for (scaled_grad, grad) in zip(scaled_grads, grads)
-        # )
+        total_grads = tuple(
+            _reshape_and_sum(
+                scaled_grad, n_steps, grad.shape[0] // n_steps, grad.shape[1:]
+            )
+            for (scaled_grad, grad) in zip(scaled_grads, grads)
+        )
 
-        # if not self.multiplies_by_inputs:
-        #     attributions = total_grads[0], outputs, steps, scaled_features_tpl[0]
-        # else:
-        #     multiplied_grads = tuple(
-        #         grad * (input - baseline)
-        #         for grad, input, baseline in zip(total_grads, inputs, baselines)
-        #     )
-        #     attributions = multiplied_grads[0], outputs, steps, scaled_features_tpl[0]
-        attributions = scaled_grads[0], outputs, steps, scaled_features_tpl[0]
+        if not self.multiplies_by_inputs:
+            attributions = total_grads[0], outputs, steps, scaled_features_tpl[0]
+        else:
+            multiplied_grads = tuple(
+                grad * (input - baseline)
+                for grad, input, baseline in zip(total_grads, inputs, baselines)
+            )
+            attributions = multiplied_grads[0], outputs, steps, scaled_features_tpl[0]
         return attributions
 
 
