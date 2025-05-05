@@ -72,7 +72,7 @@ class TaskDataset(Dataset):
         return DataLoader(self, batch_size=batch_size, collate_fn=partial(collate_EAP, task=self.task))
 
 
-def logit_diff_metric(logits, metric_labels,):
+def logit_diff_metric(logits, metric_labels):
     correct_index = metric_labels[:, 0]
     incorrect_index = metric_labels[:, 1]
     logits_last = logits[:, -1, :]
