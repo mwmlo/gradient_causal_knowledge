@@ -97,9 +97,10 @@ def run_from_layer_fn(model, original_input, patch_layer, patch_output, metric, 
     return diff
 
 
-def plot_attn(attn_results, model):
+def plot_attn(attn_results, model, bound=None):
     
-    bound = attn_results.abs().max()
+    if bound is None:
+        bound = attn_results.abs().max()
 
     plt.imshow(attn_results, cmap="RdBu", vmin=-bound, vmax=bound)
 
