@@ -123,7 +123,7 @@ def plot_attn_comparison(ig_attn_results, ap_attn_results, task: Task, model: Ho
         fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(8, 4))
 
         bound = ig_attn_results.abs().max()
-        im = ax1.imshow(ig_attn_results[i].detach(), cmap='coolwarm', vmin=-bound, vmax=bound)
+        im = ax1.imshow(ig_attn_results[i].detach(), cmap='RdBu', vmin=-bound, vmax=bound)
         ax1.set_title(f"Integrated Gradients ({i})")
 
         ax1.set_xlabel("Head Index")
@@ -133,7 +133,7 @@ def plot_attn_comparison(ig_attn_results, ap_attn_results, task: Task, model: Ho
         plt.colorbar(im, ax=ax1)
 
         bound = ap_attn_results.abs().max()
-        im = ax2.imshow(ap_attn_results[i].detach(), cmap='coolwarm', vmin=-bound, vmax=bound)
+        im = ax2.imshow(ap_attn_results[i].detach(), cmap='RdBu', vmin=-bound, vmax=bound)
         ax2.set_title(f"Activation Patching ({i})")
 
         ax2.set_xlabel("Head Index")
