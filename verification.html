@@ -4027,20 +4027,25 @@ Corrupted logit difference: tensor([-0.0387, -0.9451, -0.5103,  2.2153,  0.6299,
         -3.0072,  1.7392], device=&#39;cuda:0&#39;)</code></pre>
 </div>
 </div>
-<div id="911cda16" class="cell" data-execution_count="29">
+<div id="911cda16" class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>ioi_ig_zero_mlp <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ioi_ig_zero_mlp.pt&quot;</span>)</span>
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>ioi_ig_zero_mlp <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ig_clean_corrupt_attn.pt&quot;</span>)</span>
 <span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>ioi_ig_zero_attn <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ioi_ig_zero_attn.pt&quot;</span>)</span>
 <span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>ioi_ig_mlp <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ioi_ig_mlp.pt&quot;</span>)</span>
-<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>ioi_ig_attn <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ioi_ig_attn.pt&quot;</span>)</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>ig_corrupt_clean_mlp <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ig_corrupt_clean_mlp.pt&quot;</span>)</span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>ap_corrupt_clean_mlp <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ap_corrupt_clean_mlp.pt&quot;</span>)</span>
 <span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>ioi_ap_mlp <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ioi_ap_mlp.pt&quot;</span>)</span>
-<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>ioi_ap_attn <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ioi_ap_attn.pt&quot;</span>)</span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>ig_corrupt_clean_attn <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ig_corrupt_clean_attn.pt&quot;</span>)</span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>ap_corrupt_clean_attn <span class="op">=</span> torch.load(<span class="st">&quot;saved_results/ap_corrupt_clean_attn.pt&quot;</span>)</span>
 <span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>ig_zero_mlp, ig_zero_attn <span class="op">=</span> ioi_ig_zero_mlp[<span class="dv">0</span>], ioi_ig_zero_attn[<span class="dv">0</span>]</span>
-<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>ig_mlp, ap_mlp, ig_attn, ap_attn <span class="op">=</span> ioi_ig_mlp[<span class="dv">0</span>], ioi_ap_mlp[<span class="dv">0</span>], ioi_ig_attn[<span class="dv">0</span>], ioi_ap_attn[<span class="dv">0</span>]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>avg_ig_zero_mlp <span class="op">=</span> ioi_ig_zero_mlp.mean(dim<span class="op">=</span><span class="dv">0</span>, keepdim<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>avg_ig_zero_attn <span class="op">=</span> ioi_ig_zero_attn.mean(dim<span class="op">=</span><span class="dv">0</span>, keepdim<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>avg_ig_mlp <span class="op">=</span> ig_corrupt_clean_mlp.mean(dim<span class="op">=</span><span class="dv">0</span>, keepdim<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a>avg_ig_attn <span class="op">=</span> ig_corrupt_clean_attn.mean(dim<span class="op">=</span><span class="dv">0</span>, keepdim<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a>avg_ap_mlp <span class="op">=</span> ap_corrupt_clean_mlp.mean(dim<span class="op">=</span><span class="dv">0</span>, keepdim<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a>avg_ap_attn <span class="op">=</span> ap_corrupt_clean_attn.mean(dim<span class="op">=</span><span class="dv">0</span>, keepdim<span class="op">=</span><span class="va">True</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
 <div id="f2852cd9" class="cell" data-execution_count="37">
@@ -4101,6 +4106,10 @@ Corrupted logit difference: tensor([-0.0387, -0.9451, -0.5103,  2.2153,  0.6299,
 <span id="cb13-21"><a href="#cb13-21" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> mean_performance</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
+<ul>
+<li>Hypothesis: IG-exclusive components are meaningful components which influence model behaviour.</li>
+<li>Method: ablate all components which IG and AP agree on. Ablate all IG components and check performance. Ablate all AP components and check performance. We expect ablating all IG components to decrease performance more than ablating AP components.</li>
+</ul>
 <div id="3beaffd1" class="cell" data-execution_count="38">
 <details class="code-fold">
 <summary>Code</summary>
@@ -4122,10 +4131,10 @@ Corrupted logit difference: tensor([-0.0387, -0.9451, -0.5103,  2.2153,  0.6299,
 <pre><code>Baseline performance: 0.6607611179351807</code></pre>
 </div>
 </div>
-<div id="88ab291d" class="cell" data-execution_count="39">
+<div id="88ab291d" class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>ap_attn_sig <span class="op">=</span> torch.nonzero(mask_insignificant(ap_attn)) <span class="co"># Shape [n_indices, 2]</span></span>
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>ap_attn_sig <span class="op">=</span> torch.nonzero(mask_insignificant(avg_ap_attn)) <span class="co"># Shape [n_indices, 2]</span></span>
 <span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>ap_attn_performances <span class="op">=</span> []</span>
 <span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> layer_idx, head_idx <span class="kw">in</span> ap_attn_sig:</span>
@@ -4194,10 +4203,10 @@ Mean performance: 0.6420082449913025</code></pre>
 </div>
 </div>
 </div>
-<div id="c6a9361c" class="cell" data-execution_count="41">
+<div id="c6a9361c" class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>ig_attn_sig <span class="op">=</span> torch.nonzero(mask_insignificant(ig_attn)) <span class="co"># Shape [n_indices, 2]</span></span>
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>ig_attn_sig <span class="op">=</span> torch.nonzero(mask_insignificant(avg_ig_attn)) <span class="co"># Shape [n_indices, 2]</span></span>
 <span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>ig_attn_performances <span class="op">=</span> []</span>
 <span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> layer_idx, head_idx <span class="kw">in</span> ig_attn_sig:</span>
@@ -4306,10 +4315,10 @@ Attention heads not picked up: {(10, 0), (10, 6), (2, 2), (3, 0), (5, 9), (4, 11
 Spurious attention heads: {(4, 10), (5, 11), (3, 4), (11, 0), (11, 3), (0, 6), (11, 6), (9, 5), (11, 8), (1, 9)}</code></pre>
 </div>
 </div>
-<div id="0570d72b" class="cell" data-execution_count="45">
+<div id="0570d72b" class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>ig_zero_attn_sig <span class="op">=</span> torch.nonzero(mask_insignificant(ig_zero_attn)) <span class="co"># Shape [n_indices, 2]</span></span>
+<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>ig_zero_attn_sig <span class="op">=</span> torch.nonzero(mask_insignificant(avg_ig_zero_attn)) <span class="co"># Shape [n_indices, 2]</span></span>
 <span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>ig_zero_attn_performances <span class="op">=</span> []</span>
 <span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> layer_idx, head_idx <span class="kw">in</span> ig_zero_attn_sig:</span>
@@ -4421,12 +4430,12 @@ Attention heads not picked up: {(9, 0), (5, 5), (11, 10), (5, 8), (6, 9), (9, 6)
 Spurious attention heads: {(3, 4), (8, 0), (9, 5), (0, 2), (0, 5), (10, 9), (0, 8), (11, 8), (2, 11), (1, 9), (6, 2), (9, 4), (11, 1), (0, 7), (2, 10), (1, 8), (4, 10), (5, 11), (0, 0), (11, 0), (11, 3), (0, 9), (1, 4), (0, 6), (11, 6)}</code></pre>
 </div>
 </div>
-<div id="856459c3" class="cell" data-execution_count="49">
+<div id="856459c3" class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a>plot_attn(ig_attn, model)</span>
-<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a>plot_attn(ap_attn, model)</span>
-<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a>plot_attn(ig_zero_attn, model)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a>plot_attn(avg_ig_attn, model)</span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a>plot_attn(avg_ap_attn, model)</span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a>plot_attn(avg_ig_zero_attn, model)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-display">
 <div>
