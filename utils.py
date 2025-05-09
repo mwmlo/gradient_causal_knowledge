@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import torch
 from transformer_lens import HookedTransformer
+from transformer_lens.utils import get_act_name
 from sklearn.preprocessing import MaxAbsScaler
 from enum import Enum
 from torch.utils.data import Dataset, DataLoader
@@ -203,3 +204,46 @@ def plot_mean_diff(ig_scores, ap_scores, title=None):
         plt.title(title)
     plt.legend()
     plt.show()
+
+
+def run_ablated_attn(model: HookedTransformer, layer_idx, head_idx, corrupted_cache, metric, metric_labels, *model_args, **model_kwargs):
+    # Patch in corrupted activations
+    def ablate_head_hook(act, hook):
+        act[:, :, head_idx] = corrupted_cache[hook.name][:, :, head_idx]
+        return act
+    
+    layer_name = get_act_name("result", layer_idx)
+
+    logits = model.run_with_hooks(*model_args, **model_kwargs, fwd_hooks=[(layer_name, ablate_head_hook)])
+    return metric(logits, metric_labels)
+
+def run_ablated_neuron(model, layer_idx, neuron_idx, corrupted_cache, metric, metric_labels, *model_args, **model_kwargs):
+    ablate_head_hook = lambda act, hook: corrupted_cache[hook.name][:, :, neuron_idx]
+    layer_name = get_act_name("post", layer_idx)
+
+    logits = model.run_with_hooks(*model_args, **model_kwargs, fwd_hooks=[(layer_name, ablate_head_hook)])
+    return metric(logits, metric_labels)
+
+
+def test_ablated_ioi_performance(model, layer_idx, pos, is_attn: bool):
+    print(f"Test IOI performance with ablated {layer_idx, pos}")
+    test_dataset = TaskDataset(Task.IOI)
+    test_dataloader = test_dataset.to_dataloader(batch_size=10)
+
+    mean_performance = 0
+    for clean_input, corrupted_input, labels in test_dataloader:
+        clean_tokens = model.to_tokens(clean_input)
+        corrupted_tokens = model.to_tokens(corrupted_input)
+        _, corrupted_cache = model.run_with_cache(corrupted_tokens)
+        
+        if is_attn:
+            performance = run_ablated_attn(model, layer_idx, pos, corrupted_cache, logit_diff_metric, labels, clean_tokens)
+        else:
+            performance = run_ablated_neuron(model, layer_idx, pos, corrupted_cache, logit_diff_metric, labels, clean_tokens)
+        
+        mean_performance += performance.sum()
+
+    mean_performance /= len(test_dataset)
+    print(f"Mean performance: {mean_performance}")
+    return mean_performance
+
