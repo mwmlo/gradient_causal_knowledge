@@ -80,9 +80,9 @@ def compute_layer_to_output_attributions(
 
 def integrated_gradients(
     model: HookedTransformer,
-    clean_tokens: torch.Tensor,
-    clean_cache: ActivationCache,
-    corrupted_cache: ActivationCache,
+    baseline_tokens: torch.Tensor,
+    baseline_cache: ActivationCache,
+    input_cache: ActivationCache,
     metric: callable,
     metric_labels,
 ):
@@ -91,7 +91,7 @@ def integrated_gradients(
     attention head in the model. Uses corrupt_cache activations as input
     and clean_cache activations as baseline.
     """
-    n_samples = clean_tokens.size(0)
+    n_samples = baseline_tokens.size(0)
 
     # Gradient attribution for neurons in MLP layers
     mlp_results = torch.zeros(n_samples, model.cfg.n_layers, model.cfg.d_mlp)
@@ -107,15 +107,15 @@ def integrated_gradients(
         prev_layer_hook = get_act_name("z", layer)
         prev_layer = model.hook_dict[prev_layer_hook]
 
-        layer_clean_input = clean_cache[prev_layer_hook]
-        layer_corrupt_input = corrupted_cache[prev_layer_hook]
+        layer_input = input_cache[prev_layer_hook]
+        layer_baseline = baseline_cache[prev_layer_hook]
 
         # Shape [batch, seq_len, d_head, d_model]
         attributions = compute_layer_to_output_attributions(
             model,
-            clean_tokens,
-            layer_corrupt_input,
-            layer_clean_input,
+            baseline_tokens,
+            layer_input,
+            layer_baseline,
             target_layer,
             prev_layer,
             metric,
@@ -133,15 +133,15 @@ def integrated_gradients(
         prev_layer_hook = get_act_name("mlp_in", layer)
         prev_layer = model.hook_dict[prev_layer_hook]
 
-        layer_clean_input = clean_cache[prev_layer_hook]
-        layer_corrupt_input = corrupted_cache[prev_layer_hook]
+        layer_input = input_cache[prev_layer_hook]
+        layer_baseline = baseline_cache[prev_layer_hook]
 
         # Shape [batch, seq_len, d_model]
         attributions = compute_layer_to_output_attributions(
             model,
-            clean_tokens,
-            layer_corrupt_input,
-            layer_clean_input,
+            baseline_tokens,
+            layer_input,
+            layer_baseline,
             target_layer,
             prev_layer,
             metric,
@@ -178,6 +178,7 @@ def activation_patching(
 ):
     """
     Calculate activation patching scores for every MLP neuron and attention head in the model.
+    Patches corrupted_cache activations into clean run.
     """
     n_samples = clean_tokens.size(0)
 
