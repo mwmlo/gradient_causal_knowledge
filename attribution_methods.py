@@ -225,3 +225,19 @@ def activation_patching(
             ) / baseline_diff
 
     return mlp_results, attn_results
+
+
+# MISCELLANEOUS #
+
+def highlight_components(attribution_scores):
+    """
+    Return a binary tensor of the same shape as attribution_scores, with 1s in components
+    with high attribution scores ("important" components).
+    Also returns the indices of the highlighted components.
+    """
+    mean_score = attribution_scores.mean()
+    std_score = attribution_scores.std()
+
+    highlighted_components = attribution_scores.abs() > (mean_score + std_score)
+    highlighted_indices = highlighted_components.nonzero()
+    return highlighted_components, highlighted_indices
