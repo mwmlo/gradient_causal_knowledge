@@ -190,7 +190,13 @@ def test_ablated_performance(
 
 def average_correlation(x, y):
     n_samples = x.size(0)
-
     xs = x.reshape(n_samples, -1)
     ys = y.reshape(n_samples, -1)
-    return np.corrcoef(xs, ys)
+
+    total_corr = 0
+    for x, y in zip(xs, ys):
+        corr = np.corrcoef(x, y)[0, 1]
+        total_corr += np.abs(corr)
+
+    avg_corr = total_corr / n_samples
+    return avg_corr

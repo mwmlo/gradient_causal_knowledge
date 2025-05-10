@@ -36,7 +36,7 @@ def plot_attn_comparison(
     assert n_results == attn_b.size(0)
 
     for i in range(n_results):
-        fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(8, 4))
+        fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(10, 4))
 
         bound = attn_a.abs().max()
         im = ax1.imshow(attn_a[i].detach(), cmap="RdBu", vmin=-bound, vmax=bound)
