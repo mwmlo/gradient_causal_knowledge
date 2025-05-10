@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import torch
 from torch import Tensor
 from transformer_lens import HookedTransformer, ActivationCache
@@ -185,3 +186,11 @@ def test_ablated_performance(
 
     print(f"Mean performance: {mean_performance}")
     return mean_performance
+
+
+def average_correlation(x, y):
+    n_samples = x.size(0)
+
+    xs = x.reshape(n_samples, -1)
+    ys = y.reshape(n_samples, -1)
+    return np.corrcoef(xs, ys)
