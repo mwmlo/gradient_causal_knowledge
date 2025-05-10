@@ -200,3 +200,30 @@ def average_correlation(x, y):
 
     avg_corr = total_corr / n_samples
     return avg_corr
+
+
+def measure_overlap(x, y):
+    """
+    Calculate Jaccard score (intersection-over-union) between two batches of binary tensors.
+
+    Args:
+        x (torch.Tensor): Binary tensor of shape (batch_size, ...), dtype=torch.bool
+        y (torch.Tensor): Binary tensor of same shape as x, dtype=torch.bool
+
+    Returns:
+        torch.Tensor: Jaccard scores of shape (batch_size,)
+    """
+    assert x.shape == y.shape, f"{x.shape} does not match {y.shape}"
+    assert x.dtype == torch.bool and y.dtype == torch.bool, "Inputs must be boolean tensors"
+
+    # Flatten all but batch dimension
+    x_flat = x.view(x.shape[0], -1)
+    y_flat = y.view(y.shape[0], -1)
+
+    intersection = (x_flat & y_flat).float().sum(dim=1)
+    union = (x_flat | y_flat).float().sum(dim=1)
+
+    # Handle case where union is 0 (both are all zeros) → Jaccard = 1
+    jaccard = torch.where(union == 0, torch.ones_like(union), intersection / union)
+
+    return jaccard
