@@ -235,9 +235,9 @@ def highlight_components(attribution_scores):
     with high attribution scores ("important" components).
     Also returns the indices of the highlighted components.
     """
-    mean_score = attribution_scores.mean()
-    std_score = attribution_scores.std()
+    mean_scores = torch.mean(attribution_scores, dim=(1, 2), keepdim=True)
+    std_scores = torch.std(attribution_scores, dim=(1, 2), keepdim=True)
 
-    highlighted_components = attribution_scores.abs() > (mean_score + std_score)
+    highlighted_components = attribution_scores.abs() > (mean_scores + std_scores)
     highlighted_indices = highlighted_components.nonzero()
     return highlighted_components, highlighted_indices

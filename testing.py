@@ -196,52 +196,37 @@ def run_multi_ablated_components(
     corrupt_cache: ActivationCache,
     metric: callable,
     metric_labels: Tensor,
-    *model_args,
-    **model_kwargs,
+    input_tokens: Tensor,
 ):
     """
     Run the model with all components in ablation_indices corrupted.
     Component can either be attention head or MLP neuron.
     """
 
-    # Separate ablation indices by sample
-    grouped_ablation_indices = defaultdict(list)
-    for sample_idx, layer_idx, component_idx in ablation_indices:
-        grouped_ablation_indices[sample_idx.item()].append((layer_idx.item(), component_idx.item()))
-
     # Patch in corrupted activations
     def ablate_hook(act, hook, component_idx):
-        batch_size, n_tokens = act.size(0), act.size(1)
-        # Match shapes with batch size
-        corrupt_acts = corrupt_cache[hook.name].unsqueeze(0).expand(batch_size, -1, -1, -1)        
-        act[:, :, component_idx] = corrupt_acts[:, :n_tokens, component_idx]
+        corrupt_acts = corrupt_cache[hook.name].unsqueeze(0)     
+        act[:, :, component_idx] = corrupt_acts[:, :, component_idx]
         return act
 
-    n_samples = len(grouped_ablation_indices)
+    # Attach ablation hooks at every ablation target location
+    hook_tuples = []
+    for layer_idx, component_idx in ablation_indices:
+        if is_attn:
+            hook_name = get_act_name("result", layer_idx)
+        else:
+            hook_name = get_act_name("post", layer_idx)
 
-    total_performance = 0
-
-    for i in range(n_samples):
-        # Attach ablation hooks at every ablation target location
-        hook_tuples = []
-        for layer_idx, component_idx in grouped_ablation_indices[i]:
-            if is_attn:
-                hook_name = get_act_name("result", layer_idx)
-            else:
-                hook_name = get_act_name("post", layer_idx)
-
-            hook_tuples.append(
-                (hook_name, lambda act, hook: ablate_hook(act, hook, component_idx))
-            )
-
-        # Run model with all ablation hooks
-        logits = model.run_with_hooks(
-            *model_args, **model_kwargs, fwd_hooks=hook_tuples
+        hook_tuples.append(
+            (hook_name, lambda act, hook: ablate_hook(act, hook, component_idx))
         )
-        performance = metric(logits, metric_labels)
-        total_performance += performance
+
+    logits = model.run_with_hooks(
+        input_tokens, fwd_hooks=hook_tuples
+    )
+    performance = metric(logits, metric_labels)
     
-    return total_performance / n_samples
+    return performance
 
 
 def test_multi_ablated_performance(
@@ -255,25 +240,45 @@ def test_multi_ablated_performance(
     """
     Evaluate the model's performance on a task dataset, when component at (layer_idx, component_idx) is ablated.
     """
-    print(f"Test {task.name} performance with ablated {ablation_indices}")
+    print(f"Test {task.name} performance with {n_samples} samples of ablated components")
     test_dataset = TaskDataset(task)
-    test_dataloader = test_dataset.to_dataloader(batch_size=10)
+    test_dataloader = test_dataset.to_dataloader(batch_size=1)
 
     if task == Task.GREATER_THAN:
         metric = greater_than_prob_diff_metric
     else:
         metric = logit_diff_metric
 
+    # Separate ablation indices by sample
+    grouped_ablation_indices = defaultdict(list)
+    for sample_idx, layer_idx, component_idx in ablation_indices:
+        
+        if isinstance(sample_idx, Tensor):
+            sample_idx = sample_idx.item()
+            layer_idx = layer_idx.item()
+            component_idx = component_idx.item()
+        
+        grouped_ablation_indices[sample_idx].append((layer_idx, component_idx))
+
     mean_performance = 0
 
-    for i, (clean_input, _, labels) in enumerate(test_dataloader):
-        clean_tokens = model.to_tokens(clean_input)
+    batched_dataloader = test_dataset.to_dataloader(batch_size=n_samples)
+    clean_tokens_batch = model.to_tokens(next(iter(batched_dataloader))[0])
+
+    # Each sample may have different latent components, run one sample at a time
+    for i, (_, _, labels) in enumerate(test_dataloader):
+
+        # Stop after n_samples
+        if i >= n_samples:
+            break
+
+        clean_tokens = clean_tokens_batch[i]
 
         # Attach ablation hooks at every ablation target location
         performance = run_multi_ablated_components(
             model,
             is_attn,
-            ablation_indices,
+            grouped_ablation_indices[i],
             corrupt_cache,
             metric,
             labels,
@@ -282,10 +287,7 @@ def test_multi_ablated_performance(
 
         mean_performance += performance.sum()
 
-        if i > n_samples:
-            break
-
-    mean_performance /= len(test_dataset)
+    mean_performance /= n_samples
 
     print(f"Mean performance: {mean_performance}")
     return mean_performance
