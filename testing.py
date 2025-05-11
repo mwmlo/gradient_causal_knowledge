@@ -208,7 +208,7 @@ def run_multi_ablated_components(
         corrupt_acts = corrupt_cache[hook.name]
         act[:, :, component_idx] = corrupt_acts[:, component_idx]
         return act
-    
+
     # Attach ablation hooks at every ablation target location
     hook_tuples = []
     for layer_idx, component_idx in ablation_indices:
