@@ -3,6 +3,7 @@ from transformer_lens import HookedTransformer
 from sklearn.preprocessing import MaxAbsScaler
 import seaborn as sns
 import numpy as np
+from torch import Tensor
 
 from testing import Task
 
@@ -118,8 +119,9 @@ def plot_correlation_comparison(
 
 def plot_bar_chart(key_values: dict, xlabel: str, ylabel: str, title: str):
     categories = list(key_values.keys())
-    values = list(key_values.values())
+    values = [x.item() if isinstance(x, Tensor) else x for x in key_values.values()]
 
+    plt.figure(figsize=(10,5))
     plt.bar(categories, values)
 
     plt.xlabel(xlabel)
