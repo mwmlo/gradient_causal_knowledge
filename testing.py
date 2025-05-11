@@ -6,6 +6,7 @@ from transformer_lens import HookedTransformer, ActivationCache
 from transformer_lens.utils import get_act_name
 from enum import Enum
 from torch.utils.data import Dataset, DataLoader
+from collections import defaultdict
 
 
 class Task(Enum):
@@ -203,29 +204,44 @@ def run_multi_ablated_components(
     Component can either be attention head or MLP neuron.
     """
 
+    # Separate ablation indices by sample
+    grouped_ablation_indices = defaultdict(list)
+    for sample_idx, layer_idx, component_idx in ablation_indices:
+        grouped_ablation_indices[sample_idx.item()].append((layer_idx.item(), component_idx.item()))
+
     # Patch in corrupted activations
     def ablate_hook(act, hook, component_idx):
-        corrupt_acts = corrupt_cache[hook.name]
-        act[:, :, component_idx] = corrupt_acts[:, component_idx]
+        batch_size, n_tokens = act.size(0), act.size(1)
+        # Match shapes with batch size
+        corrupt_acts = corrupt_cache[hook.name].unsqueeze(0).expand(batch_size, -1, -1, -1)        
+        act[:, :, component_idx] = corrupt_acts[:, :n_tokens, component_idx]
         return act
 
-    # Attach ablation hooks at every ablation target location
-    hook_tuples = []
-    for layer_idx, component_idx in ablation_indices:
-        if is_attn:
-            hook_name = get_act_name("result", layer_idx)
-        else:
-            hook_name = get_act_name("post", layer_idx)
+    n_samples = len(grouped_ablation_indices)
 
-        hook_tuples.append(
-            (hook_name, lambda act, hook: ablate_hook(act, hook, component_idx))
+    total_performance = 0
+
+    for i in range(n_samples):
+        # Attach ablation hooks at every ablation target location
+        hook_tuples = []
+        for layer_idx, component_idx in grouped_ablation_indices[i]:
+            if is_attn:
+                hook_name = get_act_name("result", layer_idx)
+            else:
+                hook_name = get_act_name("post", layer_idx)
+
+            hook_tuples.append(
+                (hook_name, lambda act, hook: ablate_hook(act, hook, component_idx))
+            )
+
+        # Run model with all ablation hooks
+        logits = model.run_with_hooks(
+            *model_args, **model_kwargs, fwd_hooks=hook_tuples
         )
-
-    # Run model with all ablation hooks
-    logits = model.run_with_hooks(
-        *model_args, **model_kwargs, fwd_hooks=hook_tuples
-    )
-    return metric(logits, metric_labels)
+        performance = metric(logits, metric_labels)
+        total_performance += performance
+    
+    return total_performance / n_samples
 
 
 def test_multi_ablated_performance(
