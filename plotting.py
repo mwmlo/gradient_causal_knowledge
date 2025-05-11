@@ -116,6 +116,20 @@ def plot_correlation_comparison(
         )
 
 
+def plot_bar_chart(key_values: dict, xlabel: str, ylabel: str, title: str):
+    categories = list(key_values.keys())
+    values = list(key_values.values())
+
+    plt.bar(categories, values)
+
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+
+    plt.tight_layout()
+    plt.show()
+
+
 def plot_mean_diff(ig_scores, ap_scores, title=None):
 
     x = ig_scores.flatten().numpy()

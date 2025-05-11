@@ -108,7 +108,7 @@ def greater_than_prob_diff_metric(model, logits, correct_years):
     return results
 
 
-def run_ablated_component(
+def run_single_ablated_component(
     model: HookedTransformer,
     is_attn: bool,
     layer_idx: int,
@@ -139,16 +139,18 @@ def run_ablated_component(
     return metric(logits, metric_labels)
 
 
-def test_ablated_performance(
+def test_single_ablated_performance(
     model: HookedTransformer,
-    is_attn: bool,
     layer_idx: int,
     component_idx: int,
+    corrupt_cache: ActivationCache,
     task: Task,
+    is_attn: bool,
     n_samples=100,
 ):
     """
     Evaluate the model's performance on a task dataset, when component at (layer_idx, component_idx) is ablated.
+    Ablate by replacing activations with those from given corrupt_cache.
     """
     print(f"Test {task.name} performance with ablated {layer_idx, component_idx}")
     test_dataset = TaskDataset(task)
@@ -161,20 +163,105 @@ def test_ablated_performance(
 
     mean_performance = 0
 
-    for i, (clean_input, corrupted_input, labels) in enumerate(test_dataloader):
+    for i, (clean_input, _, labels) in enumerate(test_dataloader):
         clean_tokens = model.to_tokens(clean_input)
-        corrupted_tokens = model.to_tokens(corrupted_input)
-        _, corrupted_cache = model.run_with_cache(corrupted_tokens)
 
-        performance = run_ablated_component(
+        performance = run_single_ablated_component(
             model,
             is_attn,
             layer_idx,
             component_idx,
-            corrupted_cache,
+            corrupt_cache,
             metric,
             labels,
             clean_tokens,
+        )
+
+        mean_performance += performance.sum()
+
+        if i > n_samples:
+            break
+
+    mean_performance /= len(test_dataset)
+
+    print(f"Mean performance: {mean_performance}")
+    return mean_performance
+
+
+def run_multi_ablated_components(
+    model: HookedTransformer,
+    is_attn: bool,
+    ablation_indices: list,
+    corrupt_cache: ActivationCache,
+    metric: callable,
+    metric_labels: Tensor,
+    *model_args,
+    **model_kwargs,
+):
+    """
+    Run the model with all components in ablation_indices corrupted.
+    Component can either be attention head or MLP neuron.
+    """
+
+    # Patch in corrupted activations
+    def ablate_hook(act, hook, component_idx):
+        corrupt_acts = corrupt_cache[hook.name]
+        act[:, :, component_idx] = corrupt_acts[:, component_idx]
+        return act
+    
+    # Attach ablation hooks at every ablation target location
+    hook_tuples = []
+    for layer_idx, component_idx in ablation_indices:
+        if is_attn:
+            hook_name = get_act_name("result", layer_idx)
+        else:
+            hook_name = get_act_name("post", layer_idx)
+
+        hook_tuples.append(
+            (hook_name, lambda act, hook: ablate_hook(act, hook, component_idx))
+        )
+
+    # Run model with all ablation hooks
+    logits = model.run_with_hooks(
+        *model_args, **model_kwargs, fwd_hooks=hook_tuples
+    )
+    return metric(logits, metric_labels)
+
+
+def test_multi_ablated_performance(
+    model: HookedTransformer,
+    ablation_indices: list,
+    corrupt_cache: ActivationCache,
+    task: Task,
+    is_attn: bool,
+    n_samples=100,
+):
+    """
+    Evaluate the model's performance on a task dataset, when component at (layer_idx, component_idx) is ablated.
+    """
+    print(f"Test {task.name} performance with ablated {ablation_indices}")
+    test_dataset = TaskDataset(task)
+    test_dataloader = test_dataset.to_dataloader(batch_size=10)
+
+    if task == Task.GREATER_THAN:
+        metric = greater_than_prob_diff_metric
+    else:
+        metric = logit_diff_metric
+
+    mean_performance = 0
+
+    for i, (clean_input, _, labels) in enumerate(test_dataloader):
+        clean_tokens = model.to_tokens(clean_input)
+
+        # Attach ablation hooks at every ablation target location
+        performance = run_multi_ablated_components(
+            model,
+            is_attn,
+            ablation_indices,
+            corrupt_cache,
+            metric,
+            labels,
+            clean_tokens
         )
 
         mean_performance += performance.sum()
