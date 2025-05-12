@@ -2,6 +2,7 @@ import torch
 import math
 from enum import Enum
 from torch import Tensor
+import torch.nn.functional as F
 import torch.optim as optim
 from transformer_lens import HookedTransformer, ActivationCache
 from ..testing import logit_diff_metric
@@ -108,24 +109,45 @@ def identify_target_components(highlighted_dict: dict):
     return minimal_components | latent_components
 
 
-def inverted_hinge_loss(output_logits, target):
+def inverted_hinge_loss(output_logits, target_index):
     logit_probs = torch.softmax(output_logits)
     # Get probability of target token
-    target_prob = logit_probs[target]
+    target_prob = logit_probs[target_index]
     # Get max probability of non-target tokens
     nontarget_probs = logit_probs.clone()
-    nontarget_probs[target] = -math.inf
+    nontarget_probs[target_index] = -math.inf
     max_nontarget_prob = torch.max(nontarget_probs)
     # Calculate IHL
     return 1 + target_prob - max_nontarget_prob
 
 
-def edit_components(model: HookedTransformer, target_mlp_components: Tensor, target_attn_components: Tensor):
-    # TODO: Only fine tune target components
-    target_indices = target_components.nonzero()
-    optimizer = optim.AdamW()
-    # TODO: Fine-tune to minimise IHL loss on forget dataset + next token prediction loss on retain dataset
-    pass
+def optimise_edit_components(model: HookedTransformer, logits: Tensor, answer_index: Tensor, target_mlp_components: Tensor, target_attn_components: Tensor, optimiser: optim.Optimizer):
+    """
+    Uses binary tensors target_mlp_components and target_attn_components to identify which components to edit.
+    """
+    optimiser.zero_grad()
+
+    # Calculate gradients to minimise IHL loss on forget dataset + next token prediction loss on retain dataset
+    loss = inverted_hinge_loss(logits, answer_index) + F.cross_entropy(logits, answer_index)
+    print(f"Loss: {loss}")
+    loss.backward()
+
+    # Mask out gradients at non-target components
+    for layer_idx in range(model.cfg.n_layers):
+        # Attention components: W_K, W_Q, W_V, W_O matrices
+        layer_attn_mask = target_attn_components[layer_idx].view(model.cfg.n_heads, 1, 1)
+        model.blocks[layer_idx].attn.W_K.grad *= layer_attn_mask
+        model.blocks[layer_idx].attn.W_Q.grad *= layer_attn_mask
+        model.blocks[layer_idx].attn.W_V.grad *= layer_attn_mask
+        model.blocks[layer_idx].attn.W_O.grad *= layer_attn_mask
+
+        # MLP neuron components: W_in, W_out matrices
+        layer_mlp_mask = target_mlp_components[layer_idx]  # shape [d_mlp,]
+        model.blocks[layer_idx].mlp.W_in.grad *= layer_mlp_mask.view(1, model.cfg.d_mlp)  # shape [d_model, d_mlp]
+        model.blocks[layer_idx].mlp.W_out.grad *= layer_mlp_mask.view(model.cfg.d_mlp, 1)  # shape [d_mlp, d_model]
+
+    # Update weights using optimiser
+    optimiser.step()
 
 
 def edit_model(
@@ -133,6 +155,7 @@ def edit_model(
     original_prompt: str,
     rewrite_prompt: str,
     answer_labels: Tensor,
+    n_epochs = 5,
 ):
     original_tokens = model.to_tokens(original_prompt)
     rewrite_tokens = model.to_tokens(rewrite_prompt)
@@ -160,3 +183,12 @@ def edit_model(
     target_attn = identify_target_components(model, attn_highlighted)
 
     # EDITING STAGE
+
+    optimiser = optim.Adam(lr=2e-4)
+
+    for _ in range(n_epochs):
+        logits = model(original_tokens)
+        answer_index = answer_labels[:, 1]  # Aim for rewritten answer
+        optimise_edit_components(model, logits, answer_index, target_mlp, target_attn, optimiser)
+
+    return model
