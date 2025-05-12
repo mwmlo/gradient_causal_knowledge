@@ -2,6 +2,7 @@ import torch
 import math
 from enum import Enum
 from torch import Tensor
+import torch.optim as optim
 from transformer_lens import HookedTransformer, ActivationCache
 from ..testing import logit_diff_metric
 from ..attribution_methods import (
@@ -119,9 +120,11 @@ def inverted_hinge_loss(output_logits, target):
     return 1 + target_prob - max_nontarget_prob
 
 
-def edit_components(model: HookedTransformer, target_components: Tensor):
-    # TODO: Freeze all other components
-    # TODO: Fine-tune to minimise IHL loss + next token prediction loss
+def edit_components(model: HookedTransformer, target_mlp_components: Tensor, target_attn_components: Tensor):
+    # TODO: Only fine tune target components
+    target_indices = target_components.nonzero()
+    optimizer = optim.AdamW()
+    # TODO: Fine-tune to minimise IHL loss on forget dataset + next token prediction loss on retain dataset
     pass
 
 
