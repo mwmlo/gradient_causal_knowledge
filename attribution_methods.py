@@ -29,14 +29,13 @@ def run_from_layer_fn(
         assert (
             patch_output.shape == act.shape
         ), f"Patch shape {patch_output.shape} != activation shape {act.shape}"
-        return patch_output
+        return patch_output + 0 * act  # Trick to ensure gradients propagate
 
     logits = model.run_with_hooks(
         original_input,
         fwd_hooks=[(patch_layer.name, fwd_hook)],
         reset_hooks_end=reset_hooks_end,
     )
-
     diff = metric(logits, metric_labels)
     return diff
 
