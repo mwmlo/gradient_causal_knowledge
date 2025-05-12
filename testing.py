@@ -93,20 +93,43 @@ def greater_than_prob_diff_metric(model, logits, correct_years):
     """
     Calculate difference in logit probabilities between numbers above and below the correct year.
     """
-    batch_size = logits.size(0)
-    year_indices = model.to_tokens([f"{year:02d}" for year in range(100)])[
-        :, 1
-    ]  # Shape [100]
+    year_indices = model.to_tokens([f"{year:02d}" for year in range(100)])[:, 1]  # [100]
     logits_last = logits[:, -1, :]
-    logit_probs = torch.softmax(logits_last, dim=-1)  # Shape [batch, d_vocab]
-    year_probs = logit_probs[:, year_indices]  # Shape [batch, 100]
+    logit_probs = torch.softmax(logits_last, dim=-1)  # [batch, vocab]
+    year_probs = logit_probs[:, year_indices]  # [batch, 100]
 
-    results = torch.zeros((batch_size))
-    for i, (probs, year) in enumerate(zip(year_probs, correct_years)):
-        results[i] = probs[year+1:].sum() - probs[:year+1].sum()
+    # Create a [batch, 100] mask for indices > year
+    indices = torch.arange(100, device=correct_years.device).unsqueeze(0)  # [1, 100]
+    correct_years = correct_years.unsqueeze(1)  # [batch, 1]
 
-    results = results.to(logits.device)
-    return results
+    greater_mask = (indices > correct_years).float().to(year_probs.device)
+    lesser_equal_mask = (indices <= correct_years).float().to(year_probs.device)
+
+    greater_sum = (year_probs * greater_mask).sum(dim=1)  # [batch]
+    lesser_equal_sum = (year_probs * lesser_equal_mask).sum(dim=1)  # [batch]
+    
+    result = greater_sum - lesser_equal_sum  # [batch]
+    return result
+
+
+# def greater_than_prob_diff_metric(model, logits, correct_years):
+#     """
+#     Calculate difference in logit probabilities between numbers above and below the correct year.
+#     """
+#     batch_size = logits.size(0)
+#     year_indices = model.to_tokens([f"{year:02d}" for year in range(100)])[
+#         :, 1
+#     ]  # Shape [100]
+#     logits_last = logits[:, -1, :]
+#     logit_probs = torch.softmax(logits_last, dim=-1)  # Shape [batch, d_vocab]
+#     year_probs = logit_probs[:, year_indices]  # Shape [batch, 100]
+
+#     results = torch.zeros((batch_size))
+#     for i, (probs, year) in enumerate(zip(year_probs, correct_years)):
+#         results[i] = probs[year+1:].sum() - probs[:year+1].sum()
+
+#     results = results.to(logits.device)
+#     return results
 
 
 def run_single_ablated_component(
