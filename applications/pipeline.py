@@ -6,7 +6,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from transformer_lens import HookedTransformer, ActivationCache
 
+import os
 import sys
+
 sys.path.append("..")
 
 from testing import logit_diff_metric
@@ -21,6 +23,13 @@ class AttributionMethod(Enum):
     IG_REWRITE_ORIGINAL = 1  # IG with rewrite baseline and original input
     IG_ORIGINAL_REWRITE = 2  # IG with original baseline and rewrite input
     AP_ORIGINAL_REWRITE = 3  # AP with original clean and rewrite corrupt
+
+
+save_location = {
+    AttributionMethod.IG_REWRITE_ORIGINAL: "results/counterfact/ig_rewrite_original.pt",
+    AttributionMethod.IG_ORIGINAL_REWRITE: "results/counterfact/ig_original_rewrite.pt",
+    AttributionMethod.AP_ORIGINAL_REWRITE: "results/counterfact/ap_original_rewrite.pt",
+}
 
 
 def run_attribution_steps(
@@ -41,14 +50,25 @@ def run_attribution_steps(
     attn_attribution_highlights = dict()
 
     # Run integrated gradients with original baseline and rewrite input
-    ig_original_rewrite_mlp, ig_original_rewrite_attn = integrated_gradients(
-        model,
-        original_tokens,
-        original_cache,
-        rewrite_cache,
-        logit_diff_metric,
-        answer_labels,
-    )
+    ig_original_rewrite_path = save_location[AttributionMethod.IG_ORIGINAL_REWRITE]
+    if os.path.exists(ig_original_rewrite_path):
+        ig_original_rewrite_mlp, ig_original_rewrite_attn = torch.load(
+            ig_original_rewrite_path
+        )
+    else:
+        ig_original_rewrite_mlp, ig_original_rewrite_attn = integrated_gradients(
+            model,
+            original_tokens,
+            original_cache,
+            rewrite_cache,
+            logit_diff_metric,
+            answer_labels,
+        )
+        torch.save(
+            (ig_original_rewrite_mlp, ig_original_rewrite_attn),
+            ig_original_rewrite_path,
+        )
+
     mlp_attribution_highlights[AttributionMethod.IG_ORIGINAL_REWRITE], _ = (
         highlight_components(ig_original_rewrite_mlp)
     )
@@ -57,14 +77,25 @@ def run_attribution_steps(
     )
 
     # Run integrated gradients with rewrite baseline and original input
-    ig_rewrite_original_mlp, ig_rewrite_original_attn = integrated_gradients(
-        model,
-        rewrite_tokens,
-        rewrite_cache,
-        original_cache,
-        logit_diff_metric,
-        answer_labels,
-    )
+    ig_rewrite_original_path = save_location[AttributionMethod.IG_REWRITE_ORIGINAL]
+    if os.path.exists(ig_rewrite_original_path):
+        ig_rewrite_original_mlp, ig_rewrite_original_attn = torch.load(
+            ig_rewrite_original_path
+        )
+    else:
+        ig_rewrite_original_mlp, ig_rewrite_original_attn = integrated_gradients(
+            model,
+            rewrite_tokens,
+            rewrite_cache,
+            original_cache,
+            logit_diff_metric,
+            answer_labels,
+        )
+        torch.save(
+            (ig_rewrite_original_mlp, ig_rewrite_original_attn),
+            ig_rewrite_original_path,
+        )
+
     mlp_attribution_highlights[AttributionMethod.IG_REWRITE_ORIGINAL], _ = (
         highlight_components(ig_rewrite_original_mlp)
     )
@@ -73,15 +104,21 @@ def run_attribution_steps(
     )
 
     # Run activation patching from rewrite (corrupt) to original (clean) activations
-    ap_mlp, ap_attn = activation_patching(
-        model,
-        original_tokens,
-        original_logit_diff,
-        rewrite_cache,
-        rewrite_logit_diff,
-        logit_diff_metric,
-        answer_labels,
-    )
+    ap_path = save_location[AttributionMethod.AP_ORIGINAL_REWRITE]
+    if os.path.exists(ap_path):
+        ap_mlp, ap_attn = torch.load(ap_path)
+    else:
+        ap_mlp, ap_attn = activation_patching(
+            model,
+            original_tokens,
+            original_logit_diff,
+            rewrite_cache,
+            rewrite_logit_diff,
+            logit_diff_metric,
+            answer_labels,
+        )
+        torch.save((ap_mlp, ap_attn), ap_path)
+
     mlp_attribution_highlights[AttributionMethod.AP_ORIGINAL_REWRITE], _ = (
         highlight_components(ap_mlp)
     )

@@ -46,15 +46,18 @@ class CounterFact(Dataset):
 
         # Label includes index of original (clean) token, and index of rewritten (corrupt) token
         original_token = row["requested_rewrite.target_true.str"]
-        original_idx = self.model.to_tokens(original_token, prepend_bos=False)[:, 0].item()
+        original_idx = self.model.to_tokens(original_token, prepend_bos=False)[
+            :, 0
+        ].item()
 
         rewritten_token = row["requested_rewrite.target_new.str"]
-        rewritten_idx = self.model.to_tokens(rewritten_token, prepend_bos=False)[:, 0].item()
+        rewritten_idx = self.model.to_tokens(rewritten_token, prepend_bos=False)[
+            :, 0
+        ].item()
 
         label = [original_idx, rewritten_idx]
 
         return original_prompt, corrupt_prompt, label
-
 
     def to_dataloader(self, batch_size: int):
 
