@@ -5,8 +5,12 @@ from torch import Tensor
 import torch.nn.functional as F
 import torch.optim as optim
 from transformer_lens import HookedTransformer, ActivationCache
-from ..testing import logit_diff_metric
-from ..attribution_methods import (
+
+import sys
+sys.path.append("..")
+
+from testing import logit_diff_metric
+from attribution_methods import (
     integrated_gradients,
     activation_patching,
     highlight_components,
