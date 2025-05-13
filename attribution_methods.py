@@ -109,6 +109,9 @@ def integrated_gradients(
         layer_input = input_cache[prev_layer_hook]
         layer_baseline = baseline_cache[prev_layer_hook]
 
+        print(layer_input.shape)
+        print(layer_baseline.shape)
+
         # Shape [batch, seq_len, d_head, d_model]
         attributions = compute_layer_to_output_attributions(
             model,
