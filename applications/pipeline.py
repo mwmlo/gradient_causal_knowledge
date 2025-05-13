@@ -121,30 +121,60 @@ def inverted_hinge_loss(output_logits, target_index):
     return 1 + target_prob - max_nontarget_prob
 
 
-def optimise_edit_components(model: HookedTransformer, logits: Tensor, answer_index: Tensor, target_mlp_components: Tensor, target_attn_components: Tensor, optimiser: optim.Optimizer):
+def optimise_edit_components(
+    model: HookedTransformer,
+    logits: Tensor,
+    answer_index: Tensor,
+    target_mlp_components: Tensor,
+    target_attn_components: Tensor,
+    optimiser: optim.Optimizer,
+):
     """
     Uses binary tensors target_mlp_components and target_attn_components to identify which components to edit.
     """
     optimiser.zero_grad()
 
     # Calculate gradients to minimise IHL loss on forget dataset + next token prediction loss on retain dataset
-    loss = inverted_hinge_loss(logits, answer_index) + F.cross_entropy(logits, answer_index)
+    loss = inverted_hinge_loss(logits, answer_index) + F.cross_entropy(
+        logits, answer_index
+    )
     print(f"Loss: {loss}")
     loss.backward()
 
     # Mask out gradients at non-target components
     for layer_idx in range(model.cfg.n_layers):
         # Attention components: W_K, W_Q, W_V, W_O matrices
-        layer_attn_mask = target_attn_components[layer_idx].view(model.cfg.n_heads, 1, 1)
-        model.blocks[layer_idx].attn.W_K.grad *= layer_attn_mask
-        model.blocks[layer_idx].attn.W_Q.grad *= layer_attn_mask
-        model.blocks[layer_idx].attn.W_V.grad *= layer_attn_mask
-        model.blocks[layer_idx].attn.W_O.grad *= layer_attn_mask
+        # Match attention weight shape [n_heads, d_model, d_head] or [n_heads, d_head, d_model]
+        layer_attn_weight_mask = target_attn_components[layer_idx].view(
+            model.cfg.n_heads, 1, 1
+        )
+        # Match attention bias shape [n_heads, d_head]
+        layer_attn_bias_mask = target_attn_components[layer_idx].view(
+            model.cfg.n_heads, 1
+        )
+
+        model.blocks[layer_idx].attn.W_K.grad *= layer_attn_weight_mask  # shape []
+        model.blocks[layer_idx].attn.b_K.grad *= layer_attn_bias_mask
+
+        model.blocks[layer_idx].attn.W_Q.grad *= layer_attn_weight_mask
+        model.blocks[layer_idx].attn.b_Q.grad *= layer_attn_bias_mask
+
+        model.blocks[layer_idx].attn.W_V.grad *= layer_attn_weight_mask
+        model.blocks[layer_idx].attn.b_V.grad *= layer_attn_bias_mask
+
+        model.blocks[layer_idx].attn.W_O.grad *= layer_attn_weight_mask
+        # Attention output biases of shape [d_model,] - no need to mask on specific head
 
         # MLP neuron components: W_in, W_out matrices
         layer_mlp_mask = target_mlp_components[layer_idx]  # shape [d_mlp,]
-        model.blocks[layer_idx].mlp.W_in.grad *= layer_mlp_mask.view(1, model.cfg.d_mlp)  # shape [d_model, d_mlp]
-        model.blocks[layer_idx].mlp.W_out.grad *= layer_mlp_mask.view(model.cfg.d_mlp, 1)  # shape [d_mlp, d_model]
+        model.blocks[layer_idx].mlp.W_in.grad *= layer_mlp_mask.view(
+            1, model.cfg.d_mlp
+        )  # shape [d_model, d_mlp]
+        model.blocks[layer_idx].mlp.W_out.grad *= layer_mlp_mask.view(
+            model.cfg.d_mlp, 1
+        )  # shape [d_mlp, d_model]
+        model.blocks[layer_idx].mlp.b_in.grad *= layer_mlp_mask  # shape [d_mlp,]
+        # MLP output biases of shape [d_model,] - no need to mask on specific neuron
 
     # Update weights using optimiser
     optimiser.step()
@@ -155,7 +185,7 @@ def edit_model(
     original_prompt: str,
     rewrite_prompt: str,
     answer_labels: Tensor,
-    n_epochs = 5,
+    n_epochs=5,
 ):
     original_tokens = model.to_tokens(original_prompt)
     rewrite_tokens = model.to_tokens(rewrite_prompt)
@@ -184,11 +214,16 @@ def edit_model(
 
     # EDITING STAGE
 
-    optimiser = optim.Adam(lr=2e-4)
+    relevant_parameters = [
+        p for name, p in model.named_parameters() if "attn" in name or "mlp" in name
+    ]
+    optimiser = optim.Adam(relevant_parameters, lr=2e-4)
 
     for _ in range(n_epochs):
         logits = model(original_tokens)
         answer_index = answer_labels[:, 1]  # Aim for rewritten answer
-        optimise_edit_components(model, logits, answer_index, target_mlp, target_attn, optimiser)
+        optimise_edit_components(
+            model, logits, answer_index, target_mlp, target_attn, optimiser
+        )
 
     return model
