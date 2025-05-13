@@ -151,20 +151,22 @@ def identify_target_components(highlighted_dict: dict):
 
 
 def inverted_hinge_loss(output_logits, target_index):
-    logit_probs = torch.softmax(output_logits)
-    # Get probability of target token
-    target_prob = logit_probs[target_index]
+    logit_probs = torch.softmax(output_logits, dim=-1)
+    # Get probability of target token for each sample
+    target_prob = torch.gather(logit_probs, dim=1, index=target_index.unsqueeze(1))
+    # target_prob = logit_probs[:, target_index]
     # Get max probability of non-target tokens
     nontarget_probs = logit_probs.clone()
-    nontarget_probs[target_index] = -math.inf
-    max_nontarget_prob = torch.max(nontarget_probs)
+    nontarget_probs[:, target_index] = -math.inf
+    max_nontarget_prob = torch.max(nontarget_probs, dim=-1)[0]
     # Calculate IHL
-    return 1 + target_prob - max_nontarget_prob
+    return (1 + target_prob - max_nontarget_prob).sum()
 
 
 def optimise_edit_components(
     model: HookedTransformer,
-    logits: Tensor,
+    forget_logits: Tensor,
+    retain_logits: Tensor,
     answer_index: Tensor,
     target_mlp_components: Tensor,
     target_attn_components: Tensor,
@@ -176,9 +178,7 @@ def optimise_edit_components(
     optimiser.zero_grad()
 
     # Calculate gradients to minimise IHL loss on forget dataset + next token prediction loss on retain dataset
-    loss = inverted_hinge_loss(logits, answer_index) + F.cross_entropy(
-        logits, answer_index
-    )
+    loss = inverted_hinge_loss(forget_logits, answer_index) + F.cross_entropy(retain_logits, answer_index, reduction="sum")
     print(f"Loss: {loss}")
     loss.backward()
 
@@ -186,11 +186,11 @@ def optimise_edit_components(
     for layer_idx in range(model.cfg.n_layers):
         # Attention components: W_K, W_Q, W_V, W_O matrices
         # Match attention weight shape [n_heads, d_model, d_head] or [n_heads, d_head, d_model]
-        layer_attn_weight_mask = target_attn_components[layer_idx].view(
+        layer_attn_weight_mask = target_attn_components[:, layer_idx].view(
             model.cfg.n_heads, 1, 1
         )
         # Match attention bias shape [n_heads, d_head]
-        layer_attn_bias_mask = target_attn_components[layer_idx].view(
+        layer_attn_bias_mask = target_attn_components[:, layer_idx].view(
             model.cfg.n_heads, 1
         )
 
@@ -261,7 +261,8 @@ def edit_model(
     optimiser = optim.Adam(relevant_parameters, lr=2e-4)
 
     for _ in range(n_epochs):
-        logits = model(original_tokens)
+        # Take the output logits at the last token, which is used for next token prediction
+        logits = model(original_tokens)[:, -1, :]
         answer_index = answer_labels[:, 1]  # Aim for rewritten answer
         optimise_edit_components(
             model, logits, answer_index, target_mlp, target_attn, optimiser
