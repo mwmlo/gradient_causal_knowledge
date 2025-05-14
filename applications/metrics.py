@@ -3,6 +3,14 @@ from torch import Tensor
 import torch
 import ast
 from applications.datasets import CounterFact, CounterFactEvaluation
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+
+def generate_next_token(model: HookedTransformer, prompts: list[str]):
+    logits = model.forward(prompts)[:, -1, :]
+    logit_probs = torch.softmax(logits, dim=-1)
+    outputs = torch.argmax(logit_probs, dim=-1)
+    return [model.to_string(o) for o in outputs]
 
 
 def efficacy_scores(
@@ -18,8 +26,8 @@ def efficacy_scores(
         print(f"Prompts: {prompts}")
         print(f"Original label: {model.to_string(original_label)}")
         print(f"Target label: {model.to_string(target_label)}")
-        outputs = torch.argmax(logit_probs, dim=-1)
-        print(f"Outputs: {[model.to_string(o) for o in outputs]}")
+        outputs = generate_next_token(model, prompts)
+        print(f"Outputs: {outputs}")
 
     # Compute fraction of sample where new facts are more likely than original facts
     count_edited = torch.count_nonzero(
@@ -37,8 +45,8 @@ def efficacy_scores(
 
 def evaluate_counterfact_efficacy(model: HookedTransformer, prompt_index: int, verbose=False):
     # Evaluate prompt for the same subject and relation as the original prompt, phrased similarly
-    counterfact_dataset = CounterFactEvaluation(model, "generation_prompts")
-    original_input, labels = counterfact_dataset.get_single_sample(prompt_index)
+    generation_dataset = CounterFactEvaluation(model, "generation_prompts")
+    original_input, labels = generation_dataset.get_single_sample(prompt_index)
     model.eval()
     return efficacy_scores(model, original_input, labels, verbose=verbose)
 
@@ -59,3 +67,18 @@ def evaluate_counterfact_neighborhood(model: HookedTransformer, prompt_index: in
     neighborhood_inputs, labels = neighborhood_dataset.get_single_sample(prompt_index)
     model.eval()
     return efficacy_scores(model, neighborhood_inputs, labels, verbose=verbose)
+
+
+def evaluate_consistency(model: HookedTransformer, prompt_index: int, verbose=False):
+    # Generate text starting with original prompts
+    generation_dataset = CounterFactEvaluation(model, "generation_prompts")
+    generation_prompts, _ = generation_dataset.get_single_sample(prompt_index)
+    generation_answers = generate_next_token(model, generation_prompts)
+
+    # Generate text starting with reference prompts with rewritten target attributes
+    reference_dataset = CounterFactEvaluation(model, "attribute_prompts")
+    reference_prompts, labels = reference_dataset.get_single_sample(prompt_index)
+    reference_answers = generate_next_token(model, reference_prompts)
+
+    # TODO: Compute cosine similarity of TF-IDF unigram vectors
+    

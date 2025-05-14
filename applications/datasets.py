@@ -79,7 +79,7 @@ class CounterFactEvaluation(CounterFact):
 
         def __init__(self, model: HookedTransformer, prompt_type: str):
             super().__init__(model)
-            assert prompt_type == "generation_prompts" or prompt_type == "paraphrase_prompts" or prompt_type == "neighborhood_prompts", f"Invalid prompt type"
+            assert prompt_type == "generation_prompts" or prompt_type == "paraphrase_prompts" or prompt_type == "neighborhood_prompts", f"Invalid prompt type" or prompt_type == "attribute_prompts"
             self.prompt_type = prompt_type
 
         def __getitem__(self, index):
