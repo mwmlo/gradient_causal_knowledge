@@ -50,7 +50,6 @@ def evaluate_counterfact_efficacy(
     # Evaluate prompt for the same subject and relation as the original prompt, phrased similarly
     generation_dataset = CounterFactEvaluation(model, "generation_prompts")
     original_input, labels = generation_dataset.get_single_sample(prompt_index)
-    model.eval()
     return efficacy_scores(model, original_input, labels, verbose=verbose)
 
 
@@ -61,7 +60,6 @@ def evaluate_counterfact_paraphrased(
 
     paraphrased_dataset = CounterFactEvaluation(model, "paraphrase_prompts")
     paraphrased_inputs, labels = paraphrased_dataset.get_single_sample(prompt_index)
-    model.eval()
     return efficacy_scores(model, paraphrased_inputs, labels, verbose=verbose)
 
 
@@ -72,7 +70,6 @@ def evaluate_counterfact_neighborhood(
 
     neighborhood_dataset = CounterFactEvaluation(model, "neighborhood_prompts")
     neighborhood_inputs, labels = neighborhood_dataset.get_single_sample(prompt_index)
-    model.eval()
     return efficacy_scores(model, neighborhood_inputs, labels, verbose=verbose)
 
 

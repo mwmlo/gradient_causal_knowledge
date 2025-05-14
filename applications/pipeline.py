@@ -1,5 +1,6 @@
 import torch
 import math
+import copy
 from enum import Enum
 from torch import Tensor
 import torch.nn.functional as F
@@ -41,6 +42,7 @@ def run_attribution_steps(
     rewrite_cache: ActivationCache,
     original_logit_diff: Tensor,
     rewrite_logit_diff: Tensor,
+    overwrite=False,
 ):
     """
     Run three types of attribution methods on the given data samples.
@@ -51,7 +53,7 @@ def run_attribution_steps(
 
     # Run integrated gradients with original baseline and rewrite input
     ig_original_rewrite_path = save_location[AttributionMethod.IG_ORIGINAL_REWRITE]
-    if os.path.exists(ig_original_rewrite_path):
+    if not overwrite and os.path.exists(ig_original_rewrite_path):
         ig_original_rewrite_mlp, ig_original_rewrite_attn = torch.load(
             ig_original_rewrite_path
         )
@@ -78,7 +80,7 @@ def run_attribution_steps(
 
     # Run integrated gradients with rewrite baseline and original input
     ig_rewrite_original_path = save_location[AttributionMethod.IG_REWRITE_ORIGINAL]
-    if os.path.exists(ig_rewrite_original_path):
+    if not overwrite and os.path.exists(ig_rewrite_original_path):
         ig_rewrite_original_mlp, ig_rewrite_original_attn = torch.load(
             ig_rewrite_original_path
         )
@@ -105,7 +107,7 @@ def run_attribution_steps(
 
     # Run activation patching from rewrite (corrupt) to original (clean) activations
     ap_path = save_location[AttributionMethod.AP_ORIGINAL_REWRITE]
-    if os.path.exists(ap_path):
+    if not overwrite and os.path.exists(ap_path):
         ap_mlp, ap_attn = torch.load(ap_path)
     else:
         ap_mlp, ap_attn = activation_patching(
@@ -153,8 +155,8 @@ def identify_target_components(highlighted_dict: dict):
 def inverted_hinge_loss(output_logits, target_index):
     logit_probs = torch.softmax(output_logits, dim=-1)
     # Get probability of target token for each sample
-    target_prob = torch.gather(logit_probs, dim=1, index=target_index.unsqueeze(1))
-    # target_prob = logit_probs[:, target_index]
+    # target_prob = torch.gather(logit_probs, dim=1, index=target_index.unsqueeze(1))
+    target_prob = logit_probs[:, target_index]
     # Get max probability of non-target tokens
     nontarget_probs = logit_probs.clone()
     nontarget_probs[:, target_index] = -math.inf
@@ -225,19 +227,27 @@ def optimise_edit_components(
 
 def edit_model(
     model: HookedTransformer,
-    original_prompt: str,
-    rewrite_prompt: str,
+    original_prompts: list[str],
+    rewrite_prompts: list[str],
     answer_labels: Tensor,
     n_epochs=5,
+    overwrite=False,
 ):
-    original_tokens = model.to_tokens(original_prompt)
-    rewrite_tokens = model.to_tokens(rewrite_prompt)
+    assert len(original_prompts) == len(rewrite_prompts), f"Must have same number of prompts"
+    n_samples = len(original_prompts)
+
+    # Tokenise all together to ensure shapes stay the same
+    tokenised = model.to_tokens(original_prompts + rewrite_prompts, prepend_bos=False)
+    original_tokens, rewrite_tokens = [tokenised[i:i + n_samples] for i in range(0, len(tokenised), n_samples)]
+    print(original_tokens.shape, rewrite_tokens.shape)
 
     original_logits, original_cache = model.run_with_cache(original_tokens)
     original_logit_diff = logit_diff_metric(original_logits, answer_labels)
+    print(f"Original logit difference: {original_logit_diff}")
 
     rewrite_logits, rewrite_cache = model.run_with_cache(rewrite_tokens)
     rewrite_logit_diff = logit_diff_metric(rewrite_logits, answer_labels)
+    print(f"Rewrite logit difference: {rewrite_logit_diff}")
 
     # LOCALISATION STAGE
 
@@ -250,6 +260,7 @@ def edit_model(
         rewrite_cache,
         original_logit_diff,
         rewrite_logit_diff,
+        overwrite
     )
 
     target_mlp = identify_target_components(model, mlp_highlighted)
@@ -257,17 +268,26 @@ def edit_model(
 
     # EDITING STAGE
 
-    relevant_parameters = [
-        p for name, p in model.named_parameters() if "attn" in name or "mlp" in name
-    ]
-    optimiser = optim.Adam(relevant_parameters, lr=2e-4)
+    edited_models = []
 
-    for _ in range(n_epochs):
-        # Take the output logits at the last token, which is used for next token prediction
-        logits = model(original_tokens)[:, -1, :]
-        answer_index = answer_labels[:, 1]  # Aim for rewritten answer
-        optimise_edit_components(
-            model, logits, answer_index, target_mlp, target_attn, optimiser
-        )
+    for i in range(n_samples):
+        print(f"\nFine tuning model on sample {i}...")
 
-    return model
+        model_copy = copy.deepcopy(model)
+        relevant_parameters = [
+            p for name, p in model_copy.named_parameters() if "attn" in name or "mlp" in name
+        ]
+        optimiser = optim.Adam(relevant_parameters, lr=2e-4)
+        
+        for _ in range(n_epochs):
+            forget_logits = model_copy(original_prompts[i])[:, -1, :]
+            rewrite_logits = model_copy(rewrite_prompts[i])[:, -1, :]
+            answer_index = answer_labels[i, 1].unsqueeze(0)  # Aim for rewritten answer
+            
+            optimise_edit_components(
+                model_copy, forget_logits, rewrite_logits, answer_index, target_mlp[i], target_attn[i], optimiser
+            )
+        
+        edited_models.append(model_copy)
+
+    return edited_models
