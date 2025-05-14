@@ -2,17 +2,24 @@ from transformer_lens import HookedTransformer
 from torch import Tensor
 import torch
 import ast
-from applications.datasets import CounterFact
+from applications.datasets import CounterFact, CounterFactEvaluation
 
 
 def efficacy_scores(
-    model: HookedTransformer, prompts: list[str], answer_labels: Tensor
+    model: HookedTransformer, prompts: list[str], answer_labels: Tensor, verbose=False
 ):
     n_samples = len(prompts)
     original_label = answer_labels[:, 0]
     target_label = answer_labels[:, 1]
-    logits = model.forward(prompts)
+    logits = model.forward(prompts)[:, -1, :]
     logit_probs = torch.softmax(logits, dim=-1)
+
+    if verbose:
+        print(f"Prompts: {prompts}")
+        print(f"Original label: {model.to_string(original_label)}")
+        print(f"Target label: {model.to_string(target_label)}")
+        outputs = torch.argmax(logit_probs, dim=-1)
+        print(f"Outputs: {[model.to_string(o) for o in outputs]}")
 
     # Compute fraction of sample where new facts are more likely than original facts
     count_edited = torch.count_nonzero(
@@ -28,78 +35,27 @@ def efficacy_scores(
     return efficacy_score, efficacy_magnitude
 
 
-def evaluate_counterfact_efficacy(model: HookedTransformer, prompt_index: int):
+def evaluate_counterfact_efficacy(model: HookedTransformer, prompt_index: int, verbose=False):
     # Evaluate prompt for the same subject and relation as the original prompt, phrased similarly
-    counterfact_dataset = CounterFact(model)
-    original_input, _, labels = counterfact_dataset.get_single_sample(prompt_index)
-    return efficacy_scores(model, original_input, labels)
+    counterfact_dataset = CounterFactEvaluation(model, "generation_prompts")
+    original_input, labels = counterfact_dataset.get_single_sample(prompt_index)
+    model.eval()
+    return efficacy_scores(model, original_input, labels, verbose=verbose)
 
 
-def evaluate_counterfact_paraphrased(model: HookedTransformer, prompt_index: int):
+def evaluate_counterfact_paraphrased(model: HookedTransformer, prompt_index: int, verbose=False):
     # Evaluate prompts for the same subject and relation as the original prompt, rephrased with extra content
 
-    class CounterFactParaphrased(CounterFact):
-
-        def __init__(self, model: HookedTransformer):
-            super().__init__(model)
-
-        def __getitem__(self, index):
-            # Override retrieval of prompts and answers to get paraphrased content
-            row = self.df.iloc[index]
-
-            # List of paraphrased prompts
-            paraphrased_prompts = ast.literal_eval(row["paraphrase_prompts"])
-
-            # Label includes index of original (clean) token, and index of rewritten (corrupt) token
-            original_token = row["requested_rewrite.target_true.str"]
-            original_idx = self.model.to_tokens(original_token, prepend_bos=False)[
-                :, 0
-            ].item()
-
-            rewritten_token = row["requested_rewrite.target_new.str"]
-            rewritten_idx = self.model.to_tokens(rewritten_token, prepend_bos=False)[
-                :, 0
-            ].item()
-
-            label = [original_idx, rewritten_idx]
-
-            return paraphrased_prompts, None, label
-
-    paraphrased_dataset = CounterFactParaphrased(model)
+    paraphrased_dataset = CounterFactEvaluation(model, "paraphrase_prompts")
     paraphrased_inputs, labels = paraphrased_dataset.get_single_sample(prompt_index)
-    return efficacy_scores(model, paraphrased_inputs, labels)
+    model.eval()
+    return efficacy_scores(model, paraphrased_inputs, labels, verbose=verbose)
 
 
-def evaluate_counterfact_specificity(model: HookedTransformer, prompt_index: int):
+def evaluate_counterfact_neighborhood(model: HookedTransformer, prompt_index: int, verbose=False):
     # Evaluate prompts for a similar subject, relation and object as the original prompt
 
-    class CounterFactNeighborhood(CounterFact):
-
-        def __init__(self, model: HookedTransformer):
-            super().__init__(model)
-
-        def __getitem__(self, index):
-            # Override retrieval of prompts and answers to get paraphrased content
-            row = self.df.iloc[index]
-
-            # List of paraphrased prompts
-            neighborhood_prompts = ast.literal_eval(row["neighborhood_prompts"])
-
-            # Label includes index of original (clean) token, and index of rewritten (corrupt) token
-            original_token = row["requested_rewrite.target_true.str"]
-            original_idx = self.model.to_tokens(original_token, prepend_bos=False)[
-                :, 0
-            ].item()
-
-            rewritten_token = row["requested_rewrite.target_new.str"]
-            rewritten_idx = self.model.to_tokens(rewritten_token, prepend_bos=False)[
-                :, 0
-            ].item()
-
-            label = [original_idx, rewritten_idx]
-
-            return neighborhood_prompts, None, label
-
-    neighborhood_dataset = CounterFactNeighborhood(model)
+    neighborhood_dataset = CounterFactEvaluation(model, "neighborhood_prompts")
     neighborhood_inputs, labels = neighborhood_dataset.get_single_sample(prompt_index)
-    return efficacy_scores(model, neighborhood_inputs, labels)
+    model.eval()
+    return efficacy_scores(model, neighborhood_inputs, labels, verbose=verbose)
