@@ -47,6 +47,7 @@ def run_attribution_steps(
     """
     Run three types of attribution methods on the given data samples.
     Returns a dictionary of highlighted components per attribution method, for MLP and attention heads each.
+    Warning: do not use "overwrite" if working with many batches - inefficient!
     """
     mlp_attribution_highlights = dict()
     attn_attribution_highlights = dict()
@@ -179,6 +180,8 @@ def optimise_edit_components(
     """
     optimiser.zero_grad()
 
+    print(retain_logits.device, answer_index.device)
+
     # Calculate gradients to minimise IHL loss on forget dataset + next token prediction loss on retain dataset
     loss = inverted_hinge_loss(forget_logits, answer_index) + F.cross_entropy(
         retain_logits, answer_index, reduction="sum"
@@ -239,15 +242,15 @@ def edit_model(
     # Tokenise all together to ensure shapes stay the same
     tokenised = model.to_tokens(original_prompts + rewrite_prompts, prepend_bos=False)
     original_tokens, rewrite_tokens = [tokenised[i:i + n_samples] for i in range(0, len(tokenised), n_samples)]
-    print(original_tokens.shape, rewrite_tokens.shape)
+    # print(original_tokens.shape, rewrite_tokens.shape)
 
     original_logits, original_cache = model.run_with_cache(original_tokens)
     original_logit_diff = logit_diff_metric(original_logits, answer_labels)
-    print(f"Original logit difference: {original_logit_diff}")
+    # print(f"Original logit difference: {original_logit_diff}")
 
     rewrite_logits, rewrite_cache = model.run_with_cache(rewrite_tokens)
     rewrite_logit_diff = logit_diff_metric(rewrite_logits, answer_labels)
-    print(f"Rewrite logit difference: {rewrite_logit_diff}")
+    # print(f"Rewrite logit difference: {rewrite_logit_diff}")
 
     # LOCALISATION STAGE
 
@@ -263,8 +266,8 @@ def edit_model(
         overwrite
     )
 
-    target_mlp = identify_target_components(model, mlp_highlighted)
-    target_attn = identify_target_components(model, attn_highlighted)
+    target_mlp = identify_target_components(mlp_highlighted).to(model.cfg.device)
+    target_attn = identify_target_components(attn_highlighted).to(model.cfg.device)
 
     # EDITING STAGE
 

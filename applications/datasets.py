@@ -65,7 +65,7 @@ class CounterFact(Dataset):
             clean, corrupted, labels = zip(*xs)
             clean = list(clean)
             corrupted = list(corrupted)
-            labels = torch.tensor(labels)
+            labels = torch.tensor(labels).to(self.model.cfg.device)
             return clean, corrupted, labels
 
         return DataLoader(self, batch_size=batch_size, collate_fn=collate)
