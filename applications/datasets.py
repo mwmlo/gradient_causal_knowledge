@@ -77,34 +77,38 @@ class CounterFact(Dataset):
 
 class CounterFactEvaluation(CounterFact):
 
-        def __init__(self, model: HookedTransformer, prompt_type: str):
-            super().__init__(model)
-            assert prompt_type == "generation_prompts" or prompt_type == "paraphrase_prompts" or prompt_type == "neighborhood_prompts", f"Invalid prompt type" or prompt_type == "attribute_prompts"
-            self.prompt_type = prompt_type
+    def __init__(self, model: HookedTransformer, prompt_type: str):
+        super().__init__(model)
+        assert (
+            prompt_type == "generation_prompts"
+            or prompt_type == "paraphrase_prompts"
+            or prompt_type == "neighborhood_prompts"
+            or prompt_type == "attribute_prompts"
+        ), f"Invalid prompt type"
+        self.prompt_type = prompt_type
 
-        def __getitem__(self, index):
-            # Override retrieval of prompts and answers to get paraphrased content
-            row = self.df.iloc[index]
+    def __getitem__(self, index):
+        # Override retrieval of prompts and answers to get paraphrased content
+        row = self.df.iloc[index]
 
-            # List of prompts
-            prompts = ast.literal_eval(row[self.prompt_type])
+        # List of prompts
+        prompts = ast.literal_eval(row[self.prompt_type])
 
-            # Label includes index of original (clean) token, and index of rewritten (corrupt) token
-            original_token = row["requested_rewrite.target_true.str"]
-            original_idx = self.model.to_tokens(original_token, prepend_bos=False)[
-                :, 0
-            ].item()
+        # Label includes index of original (clean) token, and index of rewritten (corrupt) token
+        original_token = row["requested_rewrite.target_true.str"]
+        original_idx = self.model.to_tokens(original_token, prepend_bos=False)[
+            :, 0
+        ].item()
 
-            rewritten_token = row["requested_rewrite.target_new.str"]
-            rewritten_idx = self.model.to_tokens(rewritten_token, prepend_bos=False)[
-                :, 0
-            ].item()
+        rewritten_token = row["requested_rewrite.target_new.str"]
+        rewritten_idx = self.model.to_tokens(rewritten_token, prepend_bos=False)[
+            :, 0
+        ].item()
 
-            label = [original_idx, rewritten_idx]
+        label = [original_idx, rewritten_idx]
 
-            return prompts, label
-        
+        return prompts, label
 
-        def get_single_sample(self, index):
-            prompts, label = self.__getitem__(index)
-            return prompts, torch.tensor([label])
+    def get_single_sample(self, index):
+        prompts, label = self.__getitem__(index)
+        return prompts, torch.tensor([label])
