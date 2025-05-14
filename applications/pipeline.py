@@ -178,7 +178,9 @@ def optimise_edit_components(
     optimiser.zero_grad()
 
     # Calculate gradients to minimise IHL loss on forget dataset + next token prediction loss on retain dataset
-    loss = inverted_hinge_loss(forget_logits, answer_index) + F.cross_entropy(retain_logits, answer_index, reduction="sum")
+    loss = inverted_hinge_loss(forget_logits, answer_index) + F.cross_entropy(
+        retain_logits, answer_index, reduction="sum"
+    )
     print(f"Loss: {loss}")
     loss.backward()
 

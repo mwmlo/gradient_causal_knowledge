@@ -69,3 +69,7 @@ class CounterFact(Dataset):
             return clean, corrupted, labels
 
         return DataLoader(self, batch_size=batch_size, collate_fn=collate)
+
+    def get_single_sample(self, index):
+        original_prompt, corrupt_prompt, label = self.__getitem__(index)
+        return [original_prompt], [corrupt_prompt], torch.tensor([label])
