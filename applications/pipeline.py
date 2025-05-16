@@ -263,7 +263,7 @@ def optimise_edit_components(
 
     loss_forget = multi_token_inverted_ce(forget_logits, answer_indices)
     loss_retain = multi_token_dominance_loss(forget_logits, answer_indices, margin=1.0)
-    loss = 0.4 * loss_forget + 0.6 * loss_retain
+    loss = 0.2 * loss_forget + 0.8 * loss_retain
     print(f"Loss: {loss}")
     loss.backward()
 
@@ -359,7 +359,7 @@ def edit_model(
         relevant_parameters = [
             p for name, p in model_copy.named_parameters() if "attn" in name or "mlp" in name
         ]
-        optimiser = optim.Adam(relevant_parameters, lr=2e-4)
+        optimiser = optim.AdamW(relevant_parameters, lr=2e-4)
         
         for _ in range(n_epochs):
             forget_logits = model_copy(original_prompts[i])[:, -1, :]
