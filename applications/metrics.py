@@ -8,9 +8,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 def generate_next_token(model: HookedTransformer, prompts: list[str]):
-    logits = model.forward(prompts)[:, -1, :]
-    logit_probs = torch.softmax(logits, dim=-1)
-    outputs = torch.argmax(logit_probs, dim=-1)
+    outputs = []
+    for prompt in prompts:
+        logits = model.forward(prompt)[:, -1, :]
+        logit_probs = torch.softmax(logits, dim=-1)
+        outputs.append(torch.argmax(logit_probs, dim=-1))
+    
     return [model.to_string(o) for o in outputs]
 
 
@@ -18,28 +21,27 @@ def efficacy_scores(
     model: HookedTransformer, prompts: list[str], answer_labels: Tensor, verbose=False
 ):
     n_samples = len(prompts)
-    original_label = answer_labels[:, 0]
-    target_label = answer_labels[:, 1]
     logits = model.forward(prompts)[:, -1, :]
     logit_probs = torch.softmax(logits, dim=-1)
 
+    original_label = answer_labels[0][0]
+    target_label = answer_labels[1][0]
+
     if verbose:
-        print(f"Prompts: {prompts}")
+        # print(f"Prompts: {prompts}")
         print(f"Original label: {model.to_string(original_label)}")
         print(f"Target label: {model.to_string(target_label)}")
         outputs = generate_next_token(model, prompts)
         print(f"Outputs: {outputs}")
 
     # Compute fraction of sample where new facts are more likely than original facts
-    count_edited = torch.count_nonzero(
-        logit_probs[:, target_label] > logit_probs[:, original_label]
-    )
+    target_probs = sum([logit_probs[:, idx] for idx in target_label])
+    original_probs = sum([logit_probs[:, idx] for idx in original_label])
+    count_edited = torch.count_nonzero(target_probs > original_probs)
     efficacy_score = count_edited / n_samples
 
     # Compute mean difference between probabilities of new facts and original facts
-    efficacy_magnitude = (
-        logit_probs[:, target_label] - logit_probs[:, original_label]
-    ).mean()
+    efficacy_magnitude = (target_probs - original_probs).mean()
 
     return efficacy_score, efficacy_magnitude
 

@@ -166,11 +166,85 @@ def inverted_hinge_loss(output_logits, target_index):
     return (1 + target_prob - max_nontarget_prob).sum()
 
 
+def inverted_ce_loss(logits: Tensor, target_idx: Tensor):
+    probs = F.log_softmax(logits, dim=-1)
+    return -probs[range(len(target_idx)), target_idx].mean()
+
+
+def dominance_loss(logits: Tensor, target_idx: Tensor, margin: float = 1.0):
+    """
+    Enforces that the logit for target_idx is at least `margin` greater than all other logits.
+    """
+    print(logits.shape)
+    batch_size, vocab_size = logits.shape
+    target_logits = logits[torch.arange(batch_size), target_idx].unsqueeze(1)  # (B, 1)
+
+    # Mask out the target logits and get all other logits
+    mask = torch.ones_like(logits, dtype=torch.bool)
+    mask[torch.arange(batch_size), target_idx] = False
+    other_logits = logits[mask].view(batch_size, vocab_size - 1)  # (B, V-1)
+
+    # Margin loss: max(0, margin - (target - other))
+    loss = F.relu(margin - (target_logits - other_logits)).mean()
+    return loss
+
+
+
+
+def multi_token_inverted_ce(logits: Tensor, answer_indices: Tensor):
+    """
+    logits: [B, V]
+    answer_indices: [B, 2, T]
+    Return CE over all forget tokens
+    """
+    print(logits.shape, answer_indices.shape)
+
+    forget_targets = answer_indices[:, 0, :]  # [B, T]
+    B, T = forget_targets.shape
+
+    # Repeat logits for each token in target sequence
+    logits_repeated = logits.unsqueeze(1).expand(-1, T, -1)  # [B, T, V]
+    log_probs = F.log_softmax(logits_repeated, dim=-1)  # [B, T, V]
+
+    target_log_probs = log_probs.gather(2, forget_targets.unsqueeze(-1)).squeeze(-1)  # [B, T]
+    return -target_log_probs.mean()
+
+
+def multi_token_dominance_loss(logits: torch.Tensor, answer_indices: torch.Tensor, margin: float = 1.0):
+    """
+    logits: [B, V] — one logit distribution per example
+    answer_indices: [B, 2, T] — target tokens, use index 0 (retain)
+    """
+    retain_targets = answer_indices[:, 1, :]  # [B, T]
+    B, T = retain_targets.shape
+    V = logits.shape[-1]
+
+    # Repeat logits for each token in T
+    logits_expanded = logits.unsqueeze(1).expand(B, T, V)  # [B, T, V]
+
+    # Get target logits at each token position
+    target_logits = logits_expanded.gather(2, retain_targets.unsqueeze(-1)).squeeze(-1)  # [B, T]
+
+    # Create a one-hot mask to mask out the target tokens
+    one_hot_mask = F.one_hot(retain_targets, num_classes=V).bool()  # [B, T, V]
+    logits_masked = logits_expanded.masked_fill(one_hot_mask, float('-inf'))  # [B, T, V]
+
+    # Get the max of other logits
+    max_other_logits = logits_masked.max(dim=-1).values  # [B, T]
+
+    # Compute margin-based hinge loss
+    margin_diff = target_logits - max_other_logits  # [B, T]
+    per_token_loss = F.relu(margin - margin_diff)  # [B, T]
+
+    # Return average loss over all tokens
+    return per_token_loss.mean()
+
+
 def optimise_edit_components(
     model: HookedTransformer,
     forget_logits: Tensor,
     retain_logits: Tensor,
-    answer_index: Tensor,
+    answer_indices: Tensor,
     target_mlp_components: Tensor,
     target_attn_components: Tensor,
     optimiser: optim.Optimizer,
@@ -180,49 +254,54 @@ def optimise_edit_components(
     """
     optimiser.zero_grad()
 
-    print(retain_logits.device, answer_index.device)
+    # print(retain_logits.device, answer_index.device)
 
     # Calculate gradients to minimise IHL loss on forget dataset + next token prediction loss on retain dataset
-    loss = inverted_hinge_loss(forget_logits, answer_index) + F.cross_entropy(
-        retain_logits, answer_index, reduction="sum"
-    )
+    # loss = inverted_hinge_loss(forget_logits, answer_index) + F.cross_entropy(
+    #     retain_logits, answer_index, reduction="sum"
+    # )
+
+    loss_forget = multi_token_inverted_ce(forget_logits, answer_indices)
+    loss_retain = multi_token_dominance_loss(forget_logits, answer_indices, margin=1.0)
+    loss = 0.4 * loss_forget + 0.6 * loss_retain
     print(f"Loss: {loss}")
     loss.backward()
 
     # Mask out gradients at non-target components
-    for layer_idx in range(model.cfg.n_layers):
-        # Attention components: W_K, W_Q, W_V, W_O matrices
-        # Match attention weight shape [n_heads, d_model, d_head] or [n_heads, d_head, d_model]
-        layer_attn_weight_mask = target_attn_components[:, layer_idx].view(
-            model.cfg.n_heads, 1, 1
-        )
-        # Match attention bias shape [n_heads, d_head]
-        layer_attn_bias_mask = target_attn_components[:, layer_idx].view(
-            model.cfg.n_heads, 1
-        )
+    with torch.no_grad():
+        for layer_idx in range(model.cfg.n_layers):
+            # Attention components: W_K, W_Q, W_V, W_O matrices
+            # Match attention weight shape [n_heads, d_model, d_head] or [n_heads, d_head, d_model]
+            layer_attn_weight_mask = target_attn_components[:, layer_idx].view(
+                model.cfg.n_heads, 1, 1
+            )
+            # Match attention bias shape [n_heads, d_head]
+            layer_attn_bias_mask = target_attn_components[:, layer_idx].view(
+                model.cfg.n_heads, 1
+            )
 
-        model.blocks[layer_idx].attn.W_K.grad *= layer_attn_weight_mask  # shape []
-        model.blocks[layer_idx].attn.b_K.grad *= layer_attn_bias_mask
+            model.blocks[layer_idx].attn.W_K.grad *= layer_attn_weight_mask  # shape []
+            model.blocks[layer_idx].attn.b_K.grad *= layer_attn_bias_mask
 
-        model.blocks[layer_idx].attn.W_Q.grad *= layer_attn_weight_mask
-        model.blocks[layer_idx].attn.b_Q.grad *= layer_attn_bias_mask
+            model.blocks[layer_idx].attn.W_Q.grad *= layer_attn_weight_mask
+            model.blocks[layer_idx].attn.b_Q.grad *= layer_attn_bias_mask
 
-        model.blocks[layer_idx].attn.W_V.grad *= layer_attn_weight_mask
-        model.blocks[layer_idx].attn.b_V.grad *= layer_attn_bias_mask
+            model.blocks[layer_idx].attn.W_V.grad *= layer_attn_weight_mask
+            model.blocks[layer_idx].attn.b_V.grad *= layer_attn_bias_mask
 
-        model.blocks[layer_idx].attn.W_O.grad *= layer_attn_weight_mask
-        # Attention output biases of shape [d_model,] - no need to mask on specific head
+            model.blocks[layer_idx].attn.W_O.grad *= layer_attn_weight_mask
+            # Attention output biases of shape [d_model,] - no need to mask on specific head
 
-        # MLP neuron components: W_in, W_out matrices
-        layer_mlp_mask = target_mlp_components[layer_idx]  # shape [d_mlp,]
-        model.blocks[layer_idx].mlp.W_in.grad *= layer_mlp_mask.view(
-            1, model.cfg.d_mlp
-        )  # shape [d_model, d_mlp]
-        model.blocks[layer_idx].mlp.W_out.grad *= layer_mlp_mask.view(
-            model.cfg.d_mlp, 1
-        )  # shape [d_mlp, d_model]
-        model.blocks[layer_idx].mlp.b_in.grad *= layer_mlp_mask  # shape [d_mlp,]
-        # MLP output biases of shape [d_model,] - no need to mask on specific neuron
+            # MLP neuron components: W_in, W_out matrices
+            layer_mlp_mask = target_mlp_components[layer_idx]  # shape [d_mlp,]
+            model.blocks[layer_idx].mlp.W_in.grad *= layer_mlp_mask.view(
+                1, model.cfg.d_mlp
+            )  # shape [d_model, d_mlp]
+            model.blocks[layer_idx].mlp.W_out.grad *= layer_mlp_mask.view(
+                model.cfg.d_mlp, 1
+            )  # shape [d_mlp, d_model]
+            model.blocks[layer_idx].mlp.b_in.grad *= layer_mlp_mask  # shape [d_mlp,]
+            # MLP output biases of shape [d_model,] - no need to mask on specific neuron
 
     # Update weights using optimiser
     optimiser.step()
@@ -285,10 +364,10 @@ def edit_model(
         for _ in range(n_epochs):
             forget_logits = model_copy(original_prompts[i])[:, -1, :]
             rewrite_logits = model_copy(rewrite_prompts[i])[:, -1, :]
-            answer_index = answer_labels[i, 1].unsqueeze(0)  # Aim for rewritten answer
+            # answer_index = answer_labels[i, 1].unsqueeze(0)  # Aim for rewritten answer
             
             optimise_edit_components(
-                model_copy, forget_logits, rewrite_logits, answer_index, target_mlp[i], target_attn[i], optimiser
+                model_copy, forget_logits, rewrite_logits, answer_labels, target_mlp[i], target_attn[i], optimiser
             )
         
         edited_models.append(model_copy)

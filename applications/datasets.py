@@ -46,16 +46,12 @@ class CounterFact(Dataset):
 
         # Label includes index of original (clean) token, and index of rewritten (corrupt) token
         original_token = row["requested_rewrite.target_true.str"]
-        original_idx = self.model.to_tokens(original_token, prepend_bos=False)[
-            :, 0
-        ].item()
-
         rewritten_token = row["requested_rewrite.target_new.str"]
-        rewritten_idx = self.model.to_tokens(rewritten_token, prepend_bos=False)[
-            :, 0
-        ].item()
+        label = self.model.to_tokens([original_token, rewritten_token], prepend_bos=False)
+        # rewritten_idxs = self.model.to_tokens(rewritten_token, prepend_bos=False)
 
-        label = [original_idx, rewritten_idx]
+        # label = [original_idxs, rewritten_idxs]
+        label = label.reshape(1, 2, -1)
 
         return original_prompt, corrupt_prompt, label
 
@@ -65,7 +61,12 @@ class CounterFact(Dataset):
             clean, corrupted, labels = zip(*xs)
             clean = list(clean)
             corrupted = list(corrupted)
-            labels = torch.tensor(labels).to(self.model.cfg.device)
+            
+            labels = labels[0]
+            print("collate", labels)
+            # print(labels)
+            # labels = torch.tensor(l).to(self.model.cfg.device)
+            # labels = list(labels)
             return clean, corrupted, labels
 
         return DataLoader(self, batch_size=batch_size, collate_fn=collate)
@@ -96,14 +97,9 @@ class CounterFactEvaluation(CounterFact):
 
         # Label includes index of original (clean) token, and index of rewritten (corrupt) token
         original_token = row["requested_rewrite.target_true.str"]
-        original_idx = self.model.to_tokens(original_token, prepend_bos=False)[
-            :, 0
-        ].item()
-
+        original_idx = self.model.to_tokens(original_token, prepend_bos=False)
         rewritten_token = row["requested_rewrite.target_new.str"]
-        rewritten_idx = self.model.to_tokens(rewritten_token, prepend_bos=False)[
-            :, 0
-        ].item()
+        rewritten_idx = self.model.to_tokens(rewritten_token, prepend_bos=False)
 
         label = [original_idx, rewritten_idx]
 
@@ -111,4 +107,4 @@ class CounterFactEvaluation(CounterFact):
 
     def get_single_sample(self, index):
         prompts, label = self.__getitem__(index)
-        return prompts, torch.tensor([label])
+        return prompts, label
