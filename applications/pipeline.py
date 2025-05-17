@@ -150,7 +150,8 @@ def identify_target_components(highlighted_dict: dict):
     )
 
     # Get union of minimal and latent components
-    return minimal_components | latent_components
+    target_components = minimal_components | latent_components
+    return target_components
 
 
 def inverted_hinge_loss(output_logits, target_index):
@@ -307,12 +308,11 @@ def optimise_edit_components(
     optimiser.step()
 
 
-def edit_model(
+def localise_models(
     model: HookedTransformer,
     original_prompts: list[str],
     rewrite_prompts: list[str],
     answer_labels: Tensor,
-    n_epochs=5,
     overwrite=False,
 ):
     assert len(original_prompts) == len(rewrite_prompts), f"Must have same number of prompts"
@@ -348,28 +348,37 @@ def edit_model(
     target_mlp = identify_target_components(mlp_highlighted).to(model.cfg.device)
     target_attn = identify_target_components(attn_highlighted).to(model.cfg.device)
 
-    # EDITING STAGE
+    print(target_mlp.shape)
+    return target_mlp, target_attn
 
-    edited_models = []
 
-    for i in range(n_samples):
-        print(f"\nFine tuning model...")
+def edit_model(
+    model: HookedTransformer,
+    original_prompt: str,
+    rewrite_prompt: str,
+    answer_labels: Tensor,
+    target_mlp: Tensor,
+    target_attn: Tensor,
+    n_epochs=5,
+):
+    print(f"\nFine tuning model...")
 
-        model_copy = copy.deepcopy(model)
-        relevant_parameters = [
-            p for name, p in model_copy.named_parameters() if "attn" in name or "mlp" in name
-        ]
-        optimiser = optim.AdamW(relevant_parameters, lr=3e-4)
+    print("Target MLP", torch.count_nonzero(target_mlp))
+    print("Target attn", torch.count_nonzero(target_attn))
+
+    model_copy = copy.deepcopy(model)
+    relevant_parameters = [
+        p for name, p in model_copy.named_parameters() if "attn" in name or "mlp" in name
+    ]
+    optimiser = optim.AdamW(relevant_parameters, lr=3e-4)
+    
+    for _ in range(n_epochs):
+        forget_logits = model_copy(original_prompt)[:, -1, :]
+        rewrite_logits = model_copy(rewrite_prompt)[:, -1, :]
+        # answer_index = answer_labels[i, 1].unsqueeze(0)  # Aim for rewritten answer
         
-        for _ in range(n_epochs):
-            forget_logits = model_copy(original_prompts[i])[:, -1, :]
-            rewrite_logits = model_copy(rewrite_prompts[i])[:, -1, :]
-            # answer_index = answer_labels[i, 1].unsqueeze(0)  # Aim for rewritten answer
-            
-            optimise_edit_components(
-                model_copy, forget_logits, rewrite_logits, answer_labels, target_mlp[i], target_attn[i], optimiser
-            )
-        
-        edited_models.append(model_copy)
+        optimise_edit_components(
+            model_copy, forget_logits, rewrite_logits, answer_labels, target_mlp, target_attn, optimiser
+        )
 
-    return edited_models
+    return model_copy
