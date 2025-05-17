@@ -175,7 +175,6 @@ def dominance_loss(logits: Tensor, target_idx: Tensor, margin: float = 1.0):
     """
     Enforces that the logit for target_idx is at least `margin` greater than all other logits.
     """
-    print(logits.shape)
     batch_size, vocab_size = logits.shape
     target_logits = logits[torch.arange(batch_size), target_idx].unsqueeze(1)  # (B, 1)
 
@@ -197,8 +196,6 @@ def multi_token_inverted_ce(logits: Tensor, answer_indices: Tensor):
     answer_indices: [B, 2, T]
     Return CE over all forget tokens
     """
-    print(logits.shape, answer_indices.shape)
-
     forget_targets = answer_indices[:, 0, :]  # [B, T]
     B, T = forget_targets.shape
 
@@ -263,8 +260,8 @@ def optimise_edit_components(
 
     loss_forget = multi_token_inverted_ce(forget_logits, answer_indices)
     loss_retain = multi_token_dominance_loss(forget_logits, answer_indices, margin=1.0)
-    loss = 0.2 * loss_forget + 0.8 * loss_retain
-    print(f"Loss: {loss}")
+    loss = 0.25 * loss_forget + 0.75 * loss_retain
+    print(f"Total loss: {loss}, forget loss: {loss_forget}, retain loss: {loss_retain}")
     loss.backward()
 
     # Mask out gradients at non-target components
@@ -302,6 +299,9 @@ def optimise_edit_components(
             )  # shape [d_mlp, d_model]
             model.blocks[layer_idx].mlp.b_in.grad *= layer_mlp_mask  # shape [d_mlp,]
             # MLP output biases of shape [d_model,] - no need to mask on specific neuron
+
+    # Gradient clipping and step
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
     # Update weights using optimiser
     optimiser.step()
@@ -353,13 +353,13 @@ def edit_model(
     edited_models = []
 
     for i in range(n_samples):
-        print(f"\nFine tuning model on sample {i}...")
+        print(f"\nFine tuning model...")
 
         model_copy = copy.deepcopy(model)
         relevant_parameters = [
             p for name, p in model_copy.named_parameters() if "attn" in name or "mlp" in name
         ]
-        optimiser = optim.AdamW(relevant_parameters, lr=2e-4)
+        optimiser = optim.AdamW(relevant_parameters, lr=3e-4)
         
         for _ in range(n_epochs):
             forget_logits = model_copy(original_prompts[i])[:, -1, :]

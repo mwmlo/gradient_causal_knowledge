@@ -237,6 +237,6 @@ def highlight_components(attribution_scores):
     mean_scores = torch.mean(attribution_scores, dim=(1, 2), keepdim=True)
     std_scores = torch.std(attribution_scores, dim=(1, 2), keepdim=True)
 
-    highlighted_components = attribution_scores.abs() > (mean_scores + std_scores)
+    highlighted_components = attribution_scores.abs() > (mean_scores + 1.96 * std_scores)
     highlighted_indices = highlighted_components.nonzero()
     return highlighted_components, highlighted_indices
