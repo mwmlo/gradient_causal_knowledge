@@ -263,15 +263,9 @@ def optimise_edit_components(
     forget_log_prob = F.log_softmax(forget_logits, dim=1)
     rewrite_prob = F.softmax(retain_logits, dim=1)
     loss_fluency = kl_loss(forget_log_prob, rewrite_prob)
-    # Editing: increase prediction score on rewritten token(s)
-    # loss_rewrite = multi_token_dominance_loss(forget_logits, answer_indices)
 
-    # loss_forget = multi_token_inverted_ce(forget_logits, answer_indices)
-    # loss_retain = multi_token_dominance_loss(forget_logits, answer_indices, margin=1.0)
-    # loss = 0.25 * loss_forget + 0.75 * loss_retain
-
-    loss = loss_forget + loss_rewrite + loss_fluency
-    # loss = loss_forget + loss_fluency
+    # Because the rewrite output might not match the rewrite target token, we do not try to match the probability distribution exactly
+    loss = loss_forget + loss_rewrite + 0.5 * loss_fluency
     print(f"Total loss: {loss}, forget loss: {loss_forget}, rewrite loss: {loss_rewrite}, fluency loss: {loss_fluency}")
 
     loss.backward()
@@ -387,7 +381,7 @@ def edit_model(
     loss = math.inf
     max_epochs = 10
     n = 0
-    while loss > 2.0 and n < max_epochs:
+    while loss > 1.5 and n < max_epochs:
         forget_logits = model_copy(original_prompt)[:, -1, :]
         rewrite_logits = model_copy(rewrite_prompt)[:, -1, :]
         # answer_index = answer_labels[i, 1].unsqueeze(0)  # Aim for rewritten answer
