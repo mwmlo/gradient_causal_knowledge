@@ -252,17 +252,18 @@ def optimise_edit_components(
     """
     optimiser.zero_grad()
 
-    # print(retain_logits.device, answer_index.device)
+    # Decrease prediction score on original token
+    loss_forget = inverted_hinge_loss(forget_logits, answer_indices[:, 0, 0])
+    # Make prediction probability distribution similar to predictions given rewritten prompt
+    loss_retain = F.cross_entropy(retain_logits, answer_indices[:, 1, 0], reduction="sum")
 
-    # Calculate gradients to minimise IHL loss on forget dataset + next token prediction loss on retain dataset
-    # loss = inverted_hinge_loss(forget_logits, answer_index) + F.cross_entropy(
-    #     retain_logits, answer_index, reduction="sum"
-    # )
+    # loss_forget = multi_token_inverted_ce(forget_logits, answer_indices)
+    # loss_retain = multi_token_dominance_loss(forget_logits, answer_indices, margin=1.0)
+    # loss = 0.25 * loss_forget + 0.75 * loss_retain
 
-    loss_forget = multi_token_inverted_ce(forget_logits, answer_indices)
-    loss_retain = multi_token_dominance_loss(forget_logits, answer_indices, margin=1.0)
-    loss = 0.25 * loss_forget + 0.75 * loss_retain
+    loss = loss_forget + loss_retain
     print(f"Total loss: {loss}, forget loss: {loss_forget}, retain loss: {loss_retain}")
+
     loss.backward()
 
     # Mask out gradients at non-target components
