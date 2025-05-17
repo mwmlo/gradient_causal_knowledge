@@ -257,7 +257,7 @@ def optimise_edit_components(
     # Decrease prediction score on original token
     loss_forget = inverted_hinge_loss(forget_logits, answer_indices[:, 0, 0])
     # Make prediction probability distribution similar to predictions given rewritten prompt
-    loss_retain = F.cross_entropy(retain_logits, answer_indices[:, 1, 0], reduction="sum")
+    loss_rewrite = F.cross_entropy(retain_logits, answer_indices[:, 1, 0], reduction="sum")
 
     kl_loss = torch.nn.KLDivLoss(reduction="batchmean")
     forget_log_prob = F.log_softmax(forget_logits, dim=1)
@@ -270,8 +270,9 @@ def optimise_edit_components(
     # loss_retain = multi_token_dominance_loss(forget_logits, answer_indices, margin=1.0)
     # loss = 0.25 * loss_forget + 0.75 * loss_retain
 
-    loss = loss_forget + loss_retain + loss_fluency
-    print(f"Total loss: {loss}, forget loss: {loss_forget}, retain loss: {loss_retain}, fluency loss: {loss_fluency}")
+    loss = loss_forget + loss_rewrite + loss_fluency
+    # loss = loss_forget + loss_fluency
+    print(f"Total loss: {loss}, forget loss: {loss_forget}, rewrite loss: {loss_rewrite}, fluency loss: {loss_fluency}")
 
     loss.backward()
 
@@ -384,7 +385,9 @@ def edit_model(
     
     # Fine tune until loss is below threshold
     loss = math.inf
-    while loss > 1.0:
+    max_epochs = 10
+    n = 0
+    while loss > 2.0 and n < max_epochs:
         forget_logits = model_copy(original_prompt)[:, -1, :]
         rewrite_logits = model_copy(rewrite_prompt)[:, -1, :]
         # answer_index = answer_labels[i, 1].unsqueeze(0)  # Aim for rewritten answer
@@ -392,5 +395,7 @@ def edit_model(
         loss = optimise_edit_components(
             model_copy, forget_logits, rewrite_logits, answer_labels, target_mlp, target_attn, optimiser
         )
+        
+        n += 1
 
     return model_copy
