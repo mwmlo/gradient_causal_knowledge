@@ -7,16 +7,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-def generate_next_token(model: HookedTransformer, prompts: list[str]):
-    outputs = []
-    for prompt in prompts:
-        logits = model.forward(prompt)[:, -1, :]
-        logit_probs = torch.softmax(logits, dim=-1)
-        outputs.append(torch.argmax(logit_probs, dim=-1))
-    
-    return [model.to_string(o) for o in outputs]
-
-
 def efficacy_scores(
     model: HookedTransformer, prompts: list[str], answer_labels: Tensor, verbose=False
 ):
@@ -31,8 +21,8 @@ def efficacy_scores(
         # print(f"Prompts: {prompts}")
         print(f"Original label: {model.to_string(original_label)}")
         print(f"Target label: {model.to_string(target_label)}")
-        outputs = generate_next_token(model, prompts)
-        print(f"Outputs: {outputs}")
+        outputs = [model.generate(prompt, max_new_tokens=5, do_sample=False) for prompt in prompts]
+        print(f"Generated Outputs: {outputs}")
 
     # Compute fraction of sample where new facts are more likely than original facts
     target_probs = sum([logit_probs[:, idx] for idx in target_label])
