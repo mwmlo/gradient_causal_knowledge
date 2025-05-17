@@ -148,9 +148,11 @@ def identify_target_components(highlighted_dict: dict):
     latent_components = (
         ig_rewrite_original_highlighted ^ ig_original_rewrite_highlighted
     )
+    # print("LATENT COMPONENTS", [torch.count_nonzero(lc) for lc in latent_components])
 
     # Get union of minimal and latent components
     target_components = minimal_components | latent_components
+    # target_components = latent_components
     return target_components
 
 
@@ -257,12 +259,19 @@ def optimise_edit_components(
     # Make prediction probability distribution similar to predictions given rewritten prompt
     loss_retain = F.cross_entropy(retain_logits, answer_indices[:, 1, 0], reduction="sum")
 
+    kl_loss = torch.nn.KLDivLoss(reduction="batchmean")
+    forget_log_prob = F.log_softmax(forget_logits, dim=1)
+    rewrite_prob = F.softmax(retain_logits, dim=1)
+    loss_fluency = kl_loss(forget_log_prob, rewrite_prob)
+    # Editing: increase prediction score on rewritten token(s)
+    # loss_rewrite = multi_token_dominance_loss(forget_logits, answer_indices)
+
     # loss_forget = multi_token_inverted_ce(forget_logits, answer_indices)
     # loss_retain = multi_token_dominance_loss(forget_logits, answer_indices, margin=1.0)
     # loss = 0.25 * loss_forget + 0.75 * loss_retain
 
-    loss = loss_forget + loss_retain
-    print(f"Total loss: {loss}, forget loss: {loss_forget}, retain loss: {loss_retain}")
+    loss = loss_forget + loss_retain + loss_fluency
+    print(f"Total loss: {loss}, forget loss: {loss_forget}, retain loss: {loss_retain}, fluency loss: {loss_fluency}")
 
     loss.backward()
 
@@ -308,6 +317,8 @@ def optimise_edit_components(
     # Update weights using optimiser
     optimiser.step()
 
+    return loss
+
 
 def localise_models(
     model: HookedTransformer,
@@ -349,7 +360,6 @@ def localise_models(
     target_mlp = identify_target_components(mlp_highlighted).to(model.cfg.device)
     target_attn = identify_target_components(attn_highlighted).to(model.cfg.device)
 
-    print(target_mlp.shape)
     return target_mlp, target_attn
 
 
@@ -360,7 +370,6 @@ def edit_model(
     answer_labels: Tensor,
     target_mlp: Tensor,
     target_attn: Tensor,
-    n_epochs=5,
 ):
     print(f"\nFine tuning model...")
 
@@ -373,12 +382,14 @@ def edit_model(
     ]
     optimiser = optim.AdamW(relevant_parameters, lr=3e-4)
     
-    for _ in range(n_epochs):
+    # Fine tune until loss is below threshold
+    loss = math.inf
+    while loss > 1.0:
         forget_logits = model_copy(original_prompt)[:, -1, :]
         rewrite_logits = model_copy(rewrite_prompt)[:, -1, :]
         # answer_index = answer_labels[i, 1].unsqueeze(0)  # Aim for rewritten answer
         
-        optimise_edit_components(
+        loss = optimise_edit_components(
             model_copy, forget_logits, rewrite_logits, answer_labels, target_mlp, target_attn, optimiser
         )
 

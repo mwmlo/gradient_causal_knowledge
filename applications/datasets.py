@@ -63,7 +63,6 @@ class CounterFact(Dataset):
             corrupted = list(corrupted)
             
             labels = labels[0]
-            print("collate", labels)
             # print(labels)
             # labels = torch.tensor(l).to(self.model.cfg.device)
             # labels = list(labels)
