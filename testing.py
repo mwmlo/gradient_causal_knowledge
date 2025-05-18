@@ -355,3 +355,21 @@ def measure_overlap(x, y):
     jaccard = torch.where(union == 0, torch.ones_like(union), intersection / union)
 
     return jaccard
+
+
+def identify_outliers(x: Tensor, y: Tensor):
+    assert x.shape == y.shape, f"Inputs must have the same shape"
+    assert len(x.shape) == 2, f"Must be a 2D input"
+    assert len(y.shape) == 2, f"Must be a 2D input"
+
+    # Note that x and y should have values on the same scale
+    diff = np.abs(x - y)
+    diff_std = np.std(diff.numpy())
+
+    outliers = []
+    for layer in range(x.size(0)):
+        for idx in range(x.size(1)):
+            if diff[layer, idx] > 1.96 * diff_std:
+                outliers.append((layer, idx))
+
+    return outliers
