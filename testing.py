@@ -63,7 +63,7 @@ class TaskDataset(Dataset):
 
         return row["clean"], row["corrupted"], label
 
-    def to_dataloader(self, batch_size: int):
+    def to_dataloader(self, batch_size: int, shuffle: bool = False):
 
         def collate_EAP(xs):
             clean, corrupted, labels = zip(*xs)
@@ -73,7 +73,7 @@ class TaskDataset(Dataset):
                 labels = torch.tensor(labels)
             return clean, corrupted, labels
 
-        return DataLoader(self, batch_size=batch_size, collate_fn=collate_EAP)
+        return DataLoader(self, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_EAP)
 
 
 def logit_diff_metric(logits, metric_labels):
@@ -154,6 +154,7 @@ def run_single_ablated_component(
 
     # Patch in corrupted activations
     def ablate_hook(act, hook):
+        # print(act.shape, corrupted_cache[hook.name].shape)
         act[:, :, component_idx] = corrupted_cache[hook.name][:, :, component_idx]
         return act
 
@@ -357,19 +358,27 @@ def measure_overlap(x, y):
     return jaccard
 
 
-def identify_outliers(x: Tensor, y: Tensor):
+def identify_outliers(x: Tensor, y: Tensor, only_collect_x_outliers: bool = False):
+    # Note that x and y should have values on the same scale
     assert x.shape == y.shape, f"Inputs must have the same shape"
     assert len(x.shape) == 2, f"Must be a 2D input"
     assert len(y.shape) == 2, f"Must be a 2D input"
 
-    # Note that x and y should have values on the same scale
-    diff = np.abs(x - y)
+    if only_collect_x_outliers:
+        # Collect components in x but not in y
+        diff = x - y
+    else:
+        diff = np.abs(x - y)
+
     diff_std = np.std(diff.numpy())
 
     outliers = []
     for layer in range(x.size(0)):
         for idx in range(x.size(1)):
             if diff[layer, idx] > 1.96 * diff_std:
-                outliers.append((layer, idx))
+                if only_collect_x_outliers and diff[layer, idx] <= 0:
+                    continue
+                else:
+                    outliers.append((layer, idx))
 
     return outliers
