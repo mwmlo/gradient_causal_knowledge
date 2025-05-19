@@ -1019,7 +1019,7 @@ def split_integrated_gradients(model: HookedTransformer, clean_tokens: torch.Ten
         
         # Shape [batch, seq_len, d_model]
         left_ig, _, _ = compute_layer_to_output_attributions_split_ig(
-            clean_tokens, layer_corrupt_input, layer_clean_input, target_layer, prev_layer, metric, metric_labels, ratio)
+            model, clean_tokens, layer_corrupt_input, layer_clean_input, target_layer, prev_layer, metric, metric_labels, ratio)
         score = left_ig.mean(dim=1)
         mlp_results[:, layer] = score
 
