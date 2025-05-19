@@ -118,7 +118,7 @@ def plot_correlation_comparison(
 
 
 def plot_bar_chart(key_values: dict, xlabel: str, ylabel: str, title: str):
-    categories = list(key_values.keys())
+    categories = [str(k) for k in key_values.keys()]
     values = [x.item() if isinstance(x, Tensor) else x for x in key_values.values()]
 
     plt.figure(figsize=(10,5))
