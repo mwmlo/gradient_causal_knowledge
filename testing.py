@@ -306,7 +306,9 @@ def run_multi_ablated_components(
 
     # Patch in corrupted activations
     def ablate_hook(act, hook, component_idx):
-        corrupt_acts = corrupt_cache[hook.name].unsqueeze(0)     
+        corrupt_acts = corrupt_cache[hook.name]
+        if len(corrupt_acts.shape) < len(act.shape):
+            corrupt_acts = corrupt_acts.unsqueeze(0)
         act[:, :, component_idx] = corrupt_acts[:, :, component_idx]
         return act
 
@@ -370,7 +372,7 @@ def test_multi_ablated_performance(
     for i, (_, _, labels) in enumerate(test_dataloader):
 
         # Stop after n_samples
-        if i >= n_samples:
+        if i >= n_samples or i > len(grouped_ablation_indices):
             break
 
         clean_tokens = clean_tokens_batch[i]
