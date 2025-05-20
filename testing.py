@@ -63,7 +63,7 @@ class TaskDataset(Dataset):
 
         return row["clean"], row["corrupted"], label
 
-    def to_dataloader(self, batch_size: int):
+    def to_dataloader(self, batch_size: int, shuffle: bool = False):
 
         def collate_EAP(xs):
             clean, corrupted, labels = zip(*xs)
@@ -73,7 +73,7 @@ class TaskDataset(Dataset):
                 labels = torch.tensor(labels)
             return clean, corrupted, labels
 
-        return DataLoader(self, batch_size=batch_size, collate_fn=collate_EAP)
+        return DataLoader(self, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_EAP)
 
 
 def logit_diff_metric(logits, metric_labels):
@@ -154,6 +154,7 @@ def run_single_ablated_component(
 
     # Patch in corrupted activations
     def ablate_hook(act, hook):
+        # print(act.shape, corrupted_cache[hook.name].shape)
         act[:, :, component_idx] = corrupted_cache[hook.name][:, :, component_idx]
         return act
 
@@ -212,6 +213,83 @@ def test_single_ablated_performance(
     return mean_performance
 
 
+def run_single_amplified_component(
+    model: HookedTransformer,
+    is_attn: bool,
+    layer_idx: int,
+    component_idx: int,
+    metric: callable,
+    metric_labels: Tensor,
+    *model_args,
+    **model_kwargs,
+):
+    """
+    Run the model with the component at (layer_idx, head_idx) corrupted.
+    Component can either be attention head or MLP neuron.
+    """
+    if is_attn:
+        layer_name = get_act_name("result", layer_idx)
+    else:
+        layer_name = get_act_name("post", layer_idx)
+
+    # Patch in corrupted activations
+    def amplify_hook(act, hook):
+        act[:, :, component_idx] = act[:, :, component_idx] * 2
+        return act
+
+    logits = model.run_with_hooks(
+        *model_args, **model_kwargs, fwd_hooks=[(layer_name, amplify_hook)]
+    )
+    return metric(logits, metric_labels)
+
+
+def test_single_amplified_performance(
+    model: HookedTransformer,
+    layer_idx: int,
+    component_idx: int,
+    task: Task,
+    is_attn: bool,
+    n_samples=100,
+):
+    """
+    Evaluate the model's performance on a task dataset, when component at (layer_idx, component_idx) is ablated.
+    Ablate by replacing activations with those from given corrupt_cache.
+    """
+    print(f"Test {task.name} performance with ablated {layer_idx, component_idx}")
+    test_dataset = TaskDataset(task)
+    test_dataloader = test_dataset.to_dataloader(batch_size=10)
+
+    if task == Task.GREATER_THAN:
+        metric = greater_than_prob_diff_metric
+    else:
+        metric = logit_diff_metric
+
+    mean_performance = 0
+
+    for i, (clean_input, _, labels) in enumerate(test_dataloader):
+        clean_tokens = model.to_tokens(clean_input)
+
+        performance = run_single_amplified_component(
+            model,
+            is_attn,
+            layer_idx,
+            component_idx,
+            metric,
+            labels,
+            clean_tokens,
+        )
+
+        mean_performance += performance.sum()
+
+        if i > n_samples:
+            break
+
+    mean_performance /= len(test_dataset)
+
+    print(f"Mean performance: {mean_performance}")
+    return mean_performance
+
+
 def run_multi_ablated_components(
     model: HookedTransformer,
     is_attn: bool,
@@ -228,7 +306,9 @@ def run_multi_ablated_components(
 
     # Patch in corrupted activations
     def ablate_hook(act, hook, component_idx):
-        corrupt_acts = corrupt_cache[hook.name].unsqueeze(0)     
+        corrupt_acts = corrupt_cache[hook.name]
+        if len(corrupt_acts.shape) < len(act.shape):
+            corrupt_acts = corrupt_acts.unsqueeze(0)
         act[:, :, component_idx] = corrupt_acts[:, :, component_idx]
         return act
 
@@ -292,7 +372,7 @@ def test_multi_ablated_performance(
     for i, (_, _, labels) in enumerate(test_dataloader):
 
         # Stop after n_samples
-        if i >= n_samples:
+        if i >= n_samples or i > len(grouped_ablation_indices):
             break
 
         clean_tokens = clean_tokens_batch[i]
@@ -355,3 +435,29 @@ def measure_overlap(x, y):
     jaccard = torch.where(union == 0, torch.ones_like(union), intersection / union)
 
     return jaccard
+
+
+def identify_outliers(x: Tensor, y: Tensor, only_collect_x_outliers: bool = False):
+    # Note that x and y should have values on the same scale
+    assert x.shape == y.shape, f"Inputs must have the same shape"
+    assert len(x.shape) == 2, f"Must be a 2D input"
+    assert len(y.shape) == 2, f"Must be a 2D input"
+
+    if only_collect_x_outliers:
+        # Collect components in x but not in y
+        diff = x - y
+    else:
+        diff = np.abs(x - y)
+
+    diff_std = np.std(diff.numpy())
+
+    outliers = []
+    for layer in range(x.size(0)):
+        for idx in range(x.size(1)):
+            if diff[layer, idx] > 1.96 * diff_std:
+                if only_collect_x_outliers and diff[layer, idx] <= 0:
+                    continue
+                else:
+                    outliers.append((layer, idx))
+
+    return outliers
