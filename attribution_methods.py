@@ -228,7 +228,7 @@ def activation_patching(
 
 # MISCELLANEOUS #
 
-def highlight_components(attribution_scores, percentile=0.8):
+def highlight_components(attribution_scores, percentile=0.9):
     """
     Return a binary tensor of the same shape as attribution_scores, with 1s in components
     with high attribution scores ("important" components).
