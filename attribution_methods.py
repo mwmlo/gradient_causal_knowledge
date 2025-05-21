@@ -228,15 +228,31 @@ def activation_patching(
 
 # MISCELLANEOUS #
 
-def highlight_components(attribution_scores):
+def highlight_components(attribution_scores, percentile=0.8):
     """
     Return a binary tensor of the same shape as attribution_scores, with 1s in components
     with high attribution scores ("important" components).
     Also returns the indices of the highlighted components.
-    """
-    mean_scores = torch.mean(attribution_scores, dim=(1, 2), keepdim=True)
-    std_scores = torch.std(attribution_scores, dim=(1, 2), keepdim=True)
 
-    highlighted_components = attribution_scores.abs() > (mean_scores + 1.96 * std_scores)
+    Percentile: threshold above while components are considered important.
+    """
+    abs_scores = attribution_scores.abs()
+    # Compute the 80th percentile threshold
+    threshold = torch.quantile(abs_scores.flatten(), percentile)
+
+    highlighted_components = abs_scores >= threshold
     highlighted_indices = highlighted_components.nonzero()
     return highlighted_components, highlighted_indices
+
+
+def asymmetry_score(corrupt_clean: Tensor, clean_corrupt: Tensor, is_ig: bool):
+    assert corrupt_clean.shape == clean_corrupt.shape, \
+        f"Cannot calculate asymmetry between matrices of different shapes, {corrupt_clean.shape} and {clean_corrupt.shape}"
+
+    if is_ig:
+        # Expect opposite directions to cancel out attribution scores
+        max_scores = torch.amax((clean_corrupt + corrupt_clean), dim=(1,2), keepdim=True)
+        return torch.div((corrupt_clean + clean_corrupt), max_scores)
+    
+    max_scores = torch.amax((corrupt_clean - clean_corrupt), dim=(1,2), keepdim=True)
+    return torch.div((corrupt_clean - clean_corrupt), max_scores)
