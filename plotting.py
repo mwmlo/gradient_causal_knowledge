@@ -8,7 +8,7 @@ from torch import Tensor
 from testing import Task
 
 
-def plot_attn(attn_results, model: HookedTransformer, bound=None):
+def plot_attn(attn_results, model: HookedTransformer, bound=None, title=None):
 
     if bound is None:
         bound = attn_results.abs().max()
@@ -19,6 +19,9 @@ def plot_attn(attn_results, model: HookedTransformer, bound=None):
     plt.xticks(list(range(model.cfg.n_heads)))
     plt.ylabel("Layer")
     plt.yticks(list(range(model.cfg.n_layers)))
+
+    if title:
+        plt.title(title)
 
     plt.colorbar()
     plt.tight_layout()
@@ -118,11 +121,11 @@ def plot_correlation_comparison(
 
 
 def plot_bar_chart(key_values: dict, xlabel: str, ylabel: str, title: str):
-    categories = [str(k) for k in key_values.keys()]
+    categories = [k.item() if isinstance(k, Tensor) else str(k) for k in key_values.keys()]
     values = [x.item() if isinstance(x, Tensor) else x for x in key_values.values()]
 
-    plt.figure(figsize=(10,5))
-    plt.bar(categories, values)
+    plt.figure(figsize=(len(values),5))
+    plt.bar(categories, values, width=0.8)
 
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
