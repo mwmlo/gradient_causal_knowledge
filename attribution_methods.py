@@ -251,7 +251,7 @@ def asymmetry_score(corrupt_clean: Tensor, clean_corrupt: Tensor, is_ig: bool):
 
     if is_ig:
         # Expect opposite directions to cancel out attribution scores
-        max_scores = torch.amax((clean_corrupt + corrupt_clean), dim=(1,2), keepdim=True)
+        max_scores = torch.amax((corrupt_clean + clean_corrupt), dim=(1,2), keepdim=True)
         return torch.div((corrupt_clean + clean_corrupt), max_scores)
     
     max_scores = torch.amax((corrupt_clean - clean_corrupt), dim=(1,2), keepdim=True)
