@@ -401,13 +401,14 @@ def average_correlation(x, y):
     xs = x.reshape(n_samples, -1)
     ys = y.reshape(n_samples, -1)
 
-    total_corr = 0
+    correlations = []
     for x, y in zip(xs, ys):
         corr = np.corrcoef(x, y)[0, 1]
-        total_corr += np.abs(corr)
+        correlations.append(corr)
 
-    avg_corr = total_corr / n_samples
-    return avg_corr
+    avg_corr = np.mean(correlations)
+    std_corr = np.std(correlations)
+    return avg_corr, std_corr
 
 
 def measure_overlap(x, y):
