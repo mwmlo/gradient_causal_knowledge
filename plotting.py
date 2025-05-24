@@ -44,7 +44,7 @@ def plot_attn_comparison(
 
         bound = attn_a.abs().max()
         im = ax1.imshow(attn_a[i].detach(), cmap="RdBu", vmin=-bound, vmax=bound)
-        ax1.set_title(f"{attn_a_title} ({i})")
+        ax1.set_title(f"{attn_a_title}")
 
         ax1.set_xlabel("Head Index")
         ax1.set_xticks(list(range(model.cfg.n_heads)))
@@ -54,7 +54,7 @@ def plot_attn_comparison(
 
         bound = attn_b.abs().max()
         im = ax2.imshow(attn_b[i].detach(), cmap="RdBu", vmin=-bound, vmax=bound)
-        ax2.set_title(f"{attn_b_title} ({i})")
+        ax2.set_title(f"{attn_b_title}")
 
         ax2.set_xlabel("Head Index")
         ax2.set_xticks(list(range(model.cfg.n_heads)))
@@ -76,7 +76,7 @@ def plot_correlation(x, y, x_label: str, y_label: str, title: str):
         sns.regplot(x=xi, y=yi)
         plt.xlabel(x_label)
         plt.ylabel(y_label)
-        plt.title(f"{title} ({i})")
+        plt.title(f"{title}")
 
         plt.tight_layout()
         plt.show()
@@ -124,7 +124,7 @@ def plot_bar_chart(key_values: dict, xlabel: str, ylabel: str, title: str):
     categories = [k.item() if isinstance(k, Tensor) else str(k) for k in key_values.keys()]
     values = [x.item() if isinstance(x, Tensor) else x for x in key_values.values()]
 
-    plt.figure(figsize=(len(values),5))
+    plt.figure(figsize=(len(values), 5))
     plt.bar(categories, values, width=0.8)
 
     plt.xlabel(xlabel)
