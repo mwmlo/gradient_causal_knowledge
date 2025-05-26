@@ -477,3 +477,6 @@ def print_jaccard_multi(ig_mlp, ig_attn, ap_mlp, ap_attn):
 
     print(f"Average Jaccard similarity score for MLP: {jaccard_mlp.mean()}")
     print(f"Average Jaccard similarity score for Attention: {jaccard_attn.mean()}")
+
+    print(f"Jaccard similarity std for MLP: {jaccard_mlp.std()}")
+    print(f"Jaccard similarity std for Attention: {jaccard_attn.std()}")
