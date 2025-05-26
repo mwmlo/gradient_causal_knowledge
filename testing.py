@@ -7,6 +7,7 @@ from transformer_lens.utils import get_act_name
 from enum import Enum
 from torch.utils.data import Dataset, DataLoader
 from collections import defaultdict
+from attribution_methods import highlight_components
 
 
 class Task(Enum):
@@ -462,3 +463,17 @@ def identify_outliers(x: Tensor, y: Tensor, only_collect_x_outliers: bool = Fals
                     outliers.append((layer, idx))
 
     return outliers
+
+
+def print_jaccard_multi(ig_mlp, ig_attn, ap_mlp, ap_attn):
+    # Jaccard similarity score
+    ig_mlp_highlights = [highlight_components(x)[0] for x in ig_mlp]
+    ig_attn_highlights = [highlight_components(x)[0] for x in ig_attn]
+    ap_mlp_highlights = [highlight_components(x)[0] for x in ap_mlp]
+    ap_attn_highlights = [highlight_components(x)[0] for x in ap_attn]
+
+    jaccard_mlp = torch.stack([measure_overlap(ig, ap) for ig, ap in zip(ig_mlp_highlights, ap_mlp_highlights)])
+    jaccard_attn = torch.stack([measure_overlap(ig, ap) for ig, ap in zip(ig_attn_highlights, ap_attn_highlights)])
+
+    print(f"Average Jaccard similarity score for MLP: {jaccard_mlp.mean()}")
+    print(f"Average Jaccard similarity score for Attention: {jaccard_attn.mean()}")
