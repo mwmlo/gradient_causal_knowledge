@@ -150,7 +150,10 @@ def plot_mean_diff(ig_scores, ap_scores, title=None):
     md = np.mean(diff)  # Mean of the difference
     sd = np.std(diff, axis=0)  # Standard deviation of the difference
 
-    sns.regplot(x=mean, y=diff, fit_reg=True, scatter=True)
+    plt.xlim(-1, 1)
+    plt.ylim(-1, 1)
+
+    g = sns.regplot(x=mean, y=diff, fit_reg=True, scatter=True, scatter_kws={'s':10}, truncate=False)
     plt.axhline(md, color="gray", linestyle="--", label="Mean difference")
     plt.axhline(
         md + 1.96 * sd, color="pink", linestyle="--", label="1.96 SD of difference"
@@ -162,6 +165,7 @@ def plot_mean_diff(ig_scores, ap_scores, title=None):
         label="-1.96 SD of difference",
     )
     plt.xlabel("Mean of attribution scores")
+
     plt.ylabel("Difference (activation patching - integrated gradients)")
     if title:
         plt.title(title)
