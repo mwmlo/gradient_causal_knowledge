@@ -364,7 +364,7 @@ def test_multi_ablated_performance(
         
         grouped_ablation_indices[sample_idx].append((layer_idx, component_idx))
 
-    mean_performance = 0
+    performances = []
 
     batched_dataloader = test_dataset.to_dataloader(batch_size=n_samples)
     clean_tokens_batch = model.to_tokens(next(iter(batched_dataloader))[0])
@@ -389,12 +389,14 @@ def test_multi_ablated_performance(
             clean_tokens
         )
 
-        mean_performance += performance.sum()
+        performances += list(performance)
 
-    mean_performance /= n_samples
+    performances = torch.tensor(performances)
+    mean_performance = performances.mean()
+    std_performance = performances.std()
+    print(f"Mean performance: {mean_performance}, Std performance: {std_performance}")
 
-    print(f"Mean performance: {mean_performance}")
-    return mean_performance
+    return mean_performance, std_performance
 
 
 def average_correlation(x, y):
@@ -442,8 +444,6 @@ def measure_overlap(x, y):
 def identify_outliers(x: Tensor, y: Tensor, only_collect_x_outliers: bool = False):
     # Note that x and y should have values on the same scale
     assert x.shape == y.shape, f"Inputs must have the same shape"
-    assert len(x.shape) == 2, f"Must be a 2D input"
-    assert len(y.shape) == 2, f"Must be a 2D input"
 
     if only_collect_x_outliers:
         # Collect components in x but not in y
@@ -451,16 +451,17 @@ def identify_outliers(x: Tensor, y: Tensor, only_collect_x_outliers: bool = Fals
     else:
         diff = np.abs(x - y)
 
-    diff_std = np.std(diff.numpy())
+    outliers = highlight_components(diff)[1]
 
-    outliers = []
-    for layer in range(x.size(0)):
-        for idx in range(x.size(1)):
-            if diff[layer, idx] > 1.96 * diff_std:
-                if only_collect_x_outliers and diff[layer, idx] <= 0:
-                    continue
-                else:
-                    outliers.append((layer, idx))
+    # diff_std = np.std(diff.numpy())
+    # outliers = []
+    # for layer in range(x.size(0)):
+    #     for idx in range(x.size(1)):
+    #         if diff[layer, idx] > 1.96 * diff_std:
+    #             if only_collect_x_outliers and diff[layer, idx] <= 0:
+    #                 continue
+    #             else:
+    #                 outliers.append((layer, idx))
 
     return outliers
 
