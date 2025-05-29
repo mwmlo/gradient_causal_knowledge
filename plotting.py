@@ -120,12 +120,24 @@ def plot_correlation_comparison(
         )
 
 
-def plot_bar_chart(key_values: dict, xlabel: str, ylabel: str, title: str):
+def plot_bar_chart(key_values: dict, xlabel: str, ylabel: str, title: str, has_std=False):
     categories = [k.item() if isinstance(k, Tensor) else str(k) for k in key_values.keys()]
-    values = [x.item() if isinstance(x, Tensor) else x for x in key_values.values()]
 
-    plt.figure(figsize=(len(values), 5))
-    plt.bar(categories, values, width=0.8)
+    if has_std:
+        values, errs = zip(*list(key_values.values()))
+        values = [x.item() if isinstance(x, Tensor) else x for x in values]
+        errs = [x.item() if isinstance(x, Tensor) else x for x in errs]
+    else:
+        values = [x.item() if isinstance(x, Tensor) else x for x in key_values.values()]
+
+    print(values)
+
+    plt.figure(figsize=(round(1.1*len(values)), 5))
+
+    if has_std:
+        plt.bar(categories, values, yerr=errs, capsize=5, width=0.8)
+    else:
+        plt.bar(categories, values, width=0.8)
 
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
