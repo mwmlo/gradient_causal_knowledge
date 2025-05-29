@@ -559,11 +559,19 @@ def run_latent_ablation_experiment(
     latent_ig_attn_ablation_scores = {"Baseline": (baseline_performance.mean(), baseline_performance.std())}
     latent_ap_attn_ablation_scores = {"Baseline": (baseline_performance.mean(), baseline_performance.std())}
 
+    latent_ig_mlp_ablation_scores = {"Baseline": (baseline_performance.mean(), baseline_performance.std())}
+    latent_ap_mlp_ablation_scores = {"Baseline": (baseline_performance.mean(), baseline_performance.std())}
+
     # 1. Ablate all OR components at once.
     latent_ig_attn_ablation_scores["OR"] = test_multi_ablated_performance(
         model, or_ig_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
     latent_ap_attn_ablation_scores["OR"] = test_multi_ablated_performance(
         model, or_ap_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+
+    latent_ig_mlp_ablation_scores["OR"] = test_multi_ablated_performance(
+        model, or_ig_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+    latent_ap_mlp_ablation_scores["OR"] = test_multi_ablated_performance(
+        model, or_ap_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
 
     # 2. Ablate all AND components at once.
     latent_ig_attn_ablation_scores["AND"] = test_multi_ablated_performance(
@@ -571,11 +579,21 @@ def run_latent_ablation_experiment(
     latent_ap_attn_ablation_scores["AND"] = test_multi_ablated_performance(
         model, and_ap_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
 
+    latent_ig_mlp_ablation_scores["AND"] = test_multi_ablated_performance(
+        model, and_ig_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+    latent_ap_mlp_ablation_scores["AND"] = test_multi_ablated_performance(
+        model, and_ap_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+
     # 3. Ablate all IG-AP components (those highlighted by both IG and AP at once).
     both_attn_ablated_performance = test_multi_ablated_performance(
         model, both_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
     latent_ig_attn_ablation_scores["IG-AP"] = both_attn_ablated_performance
     latent_ap_attn_ablation_scores["IG-AP"] = both_attn_ablated_performance
+
+    both_mlp_ablated_performance = test_multi_ablated_performance(
+        model, both_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+    latent_ig_mlp_ablation_scores["IG-AP"] = both_mlp_ablated_performance
+    latent_ap_mlp_ablation_scores["IG-AP"] = both_mlp_ablated_performance
 
     # 4. Ablate all OR components and IG-AP components.
     latent_ig_attn_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
@@ -583,26 +601,49 @@ def run_latent_ablation_experiment(
     latent_ap_attn_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
         model, or_ap_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
 
+    latent_ig_mlp_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
+        model, or_ig_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False)
+    latent_ap_mlp_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
+        model, or_ap_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False)
+
     # 5. Ablate all AND components and IG-AP components.
     latent_ig_attn_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
         model, and_ig_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
     latent_ap_attn_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
         model, and_ap_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
+
+    latent_ig_mlp_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
+        model, and_ig_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False)
+    latent_ap_mlp_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
+        model, and_ap_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False)
     
     # 6. Ablate all components highlighted by IG.
     latent_ig_attn_ablation_scores["IG"] = test_multi_ablated_performance(
         model, ig_attn_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
 
+    latent_ig_mlp_ablation_scores["IG"] = test_multi_ablated_performance(
+        model, ig_mlp_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+
     # 7. Ablate all components highlighted by AP.
     latent_ap_attn_ablation_scores["AP"] = test_multi_ablated_performance(
         model, ap_attn_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
 
-    ig_loc = f"results/latent_components/{task.name.lower()}/latent_ig_attn_ablation_scores.pt"
-    torch.save(latent_ig_attn_ablation_scores, ig_loc)
-    print(f"Saved latent IG attention ablation scores to {ig_loc}")
+    latent_ap_mlp_ablation_scores["AP"] = test_multi_ablated_performance(
+        model, ap_mlp_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
 
-    ap_loc = f"results/latent_components/{task.name.lower()}/latent_ap_attn_ablation_scores.pt"
-    torch.save(latent_ap_attn_ablation_scores, ap_loc)
-    print(f"Saved latent AP attention ablation scores to {ap_loc}")
-    
-    
+    ig_attn_loc = f"results/latent_components/{task.name.lower()}/latent_ig_attn_ablation_scores.pt"
+    torch.save(latent_ig_attn_ablation_scores, ig_attn_loc)
+    print(f"Saved latent IG attention ablation scores to {ig_attn_loc}")
+
+    ig_mlp_loc = f"results/latent_components/{task.name.lower()}/latent_ig_mlp_ablation_scores.pt"
+    torch.save(latent_ig_mlp_ablation_scores, ig_mlp_loc)
+    print(f"Saved latent IG MLP ablation scores to {ig_mlp_loc}")
+
+    ap_attn_loc = f"results/latent_components/{task.name.lower()}/latent_ap_attn_ablation_scores.pt"
+    torch.save(latent_ap_attn_ablation_scores, ap_attn_loc)
+    print(f"Saved latent AP attention ablation scores to {ap_attn_loc}")
+
+    ap_mlp_loc = f"results/latent_components/{task.name.lower()}/latent_ap_mlp_ablation_scores.pt"
+    torch.save(latent_ap_mlp_ablation_scores, ap_mlp_loc)
+    print(f"Saved latent AP MLP ablation scores to {ap_mlp_loc}")
+
