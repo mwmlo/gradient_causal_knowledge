@@ -8,6 +8,7 @@ from enum import Enum
 from torch.utils.data import Dataset, DataLoader
 from collections import defaultdict
 from attribution_methods import highlight_components
+from attribution_methods import asymmetry_score
 
 
 class Task(Enum):
@@ -481,3 +482,127 @@ def print_jaccard_multi(ig_mlp, ig_attn, ap_mlp, ap_attn):
 
     print(f"Jaccard similarity std for MLP: {jaccard_mlp.std()}")
     print(f"Jaccard similarity std for Attention: {jaccard_attn.std()}")
+
+
+def run_latent_ablation_experiment(
+    model: HookedTransformer,
+    ig_clean_corrupt_mlp,
+    ig_clean_corrupt_attn,
+    ap_clean_corrupt_mlp,
+    ap_clean_corrupt_attn,
+    ig_corrupt_clean_mlp,
+    ig_corrupt_clean_attn,
+    ap_corrupt_clean_mlp,
+    ap_corrupt_clean_attn,
+    task: Task,
+    n_samples: int = 100,
+):
+    torch.cuda.empty_cache()
+    
+    if task == Task.GREATER_THAN:
+        diff_metric = lambda logits, labels: greater_than_prob_diff_metric(model, logits, labels)
+    else:
+        diff_metric = logit_diff_metric
+
+    dataset = TaskDataset(task)
+    dataloader = dataset.to_dataloader(batch_size=100)
+    clean_input, corrupted_input, labels = next(iter(dataloader))
+
+    logits = model(clean_input)
+    baseline_performance = diff_metric(logits, labels)
+
+    # Ablate using mean corrupt activations
+    corrupted_tokens = model.to_tokens(corrupted_input)
+    _, corrupted_cache = model.run_with_cache(corrupted_tokens)
+
+    mean_corrupt_activations = dict()
+    for hook_name, act in corrupted_cache.cache_dict.items():
+        mean_corrupt_activations[hook_name] = act.mean(dim=(0,1), keepdim=True)
+
+    ig_mlp_asymmetry = asymmetry_score(ig_corrupt_clean_mlp, ig_clean_corrupt_mlp, is_ig=True)
+    ig_attn_asymmetry = asymmetry_score(ig_corrupt_clean_attn, ig_clean_corrupt_attn, is_ig=True)
+
+    ap_mlp_asymmetry = asymmetry_score(ap_corrupt_clean_mlp, ap_clean_corrupt_mlp, is_ig=False)
+    ap_attn_asymmetry = asymmetry_score(ap_corrupt_clean_attn, ap_clean_corrupt_attn, is_ig=False)
+
+    latent_attn_ig = highlight_components(ig_attn_asymmetry)[0]
+    latent_attn_ap = highlight_components(ap_attn_asymmetry)[0]
+
+    latent_mlp_ig = highlight_components(ig_mlp_asymmetry)[0]
+    latent_mlp_ap = highlight_components(ap_mlp_asymmetry)[0]
+
+    ig_attn_significant, ig_attn_significant_indices = highlight_components(ig_clean_corrupt_attn)
+    ap_attn_significant, ap_attn_significant_indices = highlight_components(ap_clean_corrupt_attn)
+
+    ig_mlp_significant, ig_mlp_significant_indices = highlight_components(ig_clean_corrupt_mlp)
+    ap_mlp_significant, ap_mlp_significant_indices = highlight_components(ap_clean_corrupt_mlp)
+
+    # AND components: corrupt->clean detects, clean->corrupt does not detect
+    and_ig_attn, and_ig_attn_indices = highlight_components(ig_attn_asymmetry)
+    and_ap_attn, and_ap_attn_indices = highlight_components(ap_attn_asymmetry)
+    and_ig_mlp, and_ig_mlp_indices = highlight_components(ig_mlp_asymmetry)
+    and_ap_mlp, and_ap_mlp_indices = highlight_components(ap_mlp_asymmetry)
+
+    # OR components: corrupt->clean does not detect, clean->corrupt detects
+    or_ig_attn, or_ig_attn_indices = highlight_components(-ig_attn_asymmetry)
+    or_ap_attn, or_ap_attn_indices = highlight_components(-ap_attn_asymmetry)
+    or_ig_mlp, or_ig_mlp_indices = highlight_components(-ig_mlp_asymmetry)
+    or_ap_mlp, or_ap_mlp_indices = highlight_components(-ap_mlp_asymmetry)
+
+    # Components highlighted by both IG and AP
+    both_attn = ig_attn_significant & ap_attn_significant
+    both_attn_indices = both_attn.nonzero()
+
+    both_mlp = ig_mlp_significant & ap_mlp_significant
+    both_mlp_indices = both_mlp.nonzero()
+
+    latent_ig_attn_ablation_scores = {"Baseline": (baseline_performance.mean(), baseline_performance.std())}
+    latent_ap_attn_ablation_scores = {"Baseline": (baseline_performance.mean(), baseline_performance.std())}
+
+    # 1. Ablate all OR components at once.
+    latent_ig_attn_ablation_scores["OR"] = test_multi_ablated_performance(
+        model, or_ig_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+    latent_ap_attn_ablation_scores["OR"] = test_multi_ablated_performance(
+        model, or_ap_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+
+    # 2. Ablate all AND components at once.
+    latent_ig_attn_ablation_scores["AND"] = test_multi_ablated_performance(
+        model, and_ig_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+    latent_ap_attn_ablation_scores["AND"] = test_multi_ablated_performance(
+        model, and_ap_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+
+    # 3. Ablate all IG-AP components (those highlighted by both IG and AP at once).
+    both_attn_ablated_performance = test_multi_ablated_performance(
+        model, both_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+    latent_ig_attn_ablation_scores["IG-AP"] = both_attn_ablated_performance
+    latent_ap_attn_ablation_scores["IG-AP"] = both_attn_ablated_performance
+
+    # 4. Ablate all OR components and IG-AP components.
+    latent_ig_attn_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
+        model, or_ig_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
+    latent_ap_attn_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
+        model, or_ap_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
+
+    # 5. Ablate all AND components and IG-AP components.
+    latent_ig_attn_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
+        model, and_ig_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
+    latent_ap_attn_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
+        model, and_ap_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
+    
+    # 6. Ablate all components highlighted by IG.
+    latent_ig_attn_ablation_scores["IG"] = test_multi_ablated_performance(
+        model, ig_attn_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+
+    # 7. Ablate all components highlighted by AP.
+    latent_ap_attn_ablation_scores["AP"] = test_multi_ablated_performance(
+        model, ap_attn_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+
+    ig_loc = f"results/latent_components/{task.name.lower()}/latent_ig_attn_ablation_scores.pt"
+    torch.save(latent_ig_attn_ablation_scores, ig_loc)
+    print(f"Saved latent IG attention ablation scores to {ig_loc}")
+
+    ap_loc = f"results/latent_components/{task.name.lower()}/latent_ap_attn_ablation_scores.pt"
+    torch.save(latent_ap_attn_ablation_scores, ap_loc)
+    print(f"Saved latent AP attention ablation scores to {ap_loc}")
+    
+    
