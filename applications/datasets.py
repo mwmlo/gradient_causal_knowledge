@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 import ast
+import random
 import torch
 from transformer_lens import HookedTransformer
 from torch.utils.data import Dataset, DataLoader
@@ -11,9 +12,13 @@ class CounterFact(Dataset):
     Loads CounterFact dataset in required format.
     """
 
-    def __init__(self, model: HookedTransformer):
+    def __init__(self, model: HookedTransformer, split: str = "train", nrows: int = 10):
         self.model = model
-        self.df = pd.read_csv(f"datasets/counterfact.csv")
+        self.split = split
+        if split == "train":
+            self.df = pd.read_csv(f"datasets/counterfact.csv", nrows=nrows)
+        elif split == "test":
+            self.df = pd.read_csv(f"datasets/counterfact_test.csv", skip_rows=nrows, nrows=nrows)
 
     def __len__(self):
         return len(self.df)
@@ -50,19 +55,38 @@ class CounterFact(Dataset):
         label = self.model.to_tokens([original_token, rewritten_token], prepend_bos=False)
         # rewritten_idxs = self.model.to_tokens(rewritten_token, prepend_bos=False)
 
-        # label = [original_idxs, rewritten_idxs]
-        label = label.reshape(1, 2, -1)
+        label = label.reshape(2, -1)
+        label = label[:, 0]
 
-        return original_prompt, corrupt_prompt, label
+        if self.split == "train":
+            # Fine tune on additional paraphrased prompts
+            paraphrase_prompts = ast.literal_eval(row["paraphrase_prompts"])
+            random_indices = random.choices(range(0, len(self) - 1), k=2)
+            random_rows = self.df.iloc[random_indices]
+            random_prompts = []
+            for i, r in random_rows.iterrows():
+                random_prompts += ast.literal_eval(r["attribute_prompts"])
+
+            return original_prompt, corrupt_prompt, label, paraphrase_prompts, random_prompts
+        else:
+            return original_prompt, corrupt_prompt, label
 
     def to_dataloader(self, batch_size: int):
 
         def collate(xs):
+            if self.split == "train":
+                # For training, we have additional paraphrased prompts
+                clean, corrupted, labels, paraphrases, random_prompts = zip(*xs)
+                clean = list(clean)
+                corrupted = list(corrupted)
+                labels = torch.stack(labels).to(self.model.cfg.device)
+                return clean, corrupted, labels, paraphrases, random_prompts
+            
+            # For test, we only have clean and corrupted prompts
             clean, corrupted, labels = zip(*xs)
             clean = list(clean)
             corrupted = list(corrupted)
             
-            labels = labels[0]
             # print(labels)
             # labels = torch.tensor(l).to(self.model.cfg.device)
             # labels = list(labels)

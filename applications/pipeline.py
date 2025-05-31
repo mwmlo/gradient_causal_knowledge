@@ -17,6 +17,7 @@ from attribution_methods import (
     integrated_gradients,
     activation_patching,
     highlight_components,
+    asymmetry_score,
 )
 
 
@@ -32,6 +33,7 @@ save_location = {
     AttributionMethod.AP_ORIGINAL_REWRITE: "results/counterfact/ap_original_rewrite.pt",
 }
 
+### LOCALISATION
 
 def run_attribution_steps(
     model: HookedTransformer,
@@ -46,7 +48,7 @@ def run_attribution_steps(
 ):
     """
     Run three types of attribution methods on the given data samples.
-    Returns a dictionary of highlighted components per attribution method, for MLP and attention heads each.
+    Returns a dictionary of attribution scores per attribution method, for MLP and attention heads each.
     Warning: do not use "overwrite" if working with many batches - inefficient!
     """
     mlp_attribution_highlights = dict()
@@ -72,12 +74,8 @@ def run_attribution_steps(
             ig_original_rewrite_path,
         )
 
-    mlp_attribution_highlights[AttributionMethod.IG_ORIGINAL_REWRITE], _ = (
-        highlight_components(ig_original_rewrite_mlp)
-    )
-    attn_attribution_highlights[AttributionMethod.IG_ORIGINAL_REWRITE], _ = (
-        highlight_components(ig_original_rewrite_attn)
-    )
+    mlp_attribution_highlights[AttributionMethod.IG_ORIGINAL_REWRITE] = ig_original_rewrite_mlp
+    attn_attribution_highlights[AttributionMethod.IG_ORIGINAL_REWRITE] = ig_original_rewrite_attn
 
     # Run integrated gradients with rewrite baseline and original input
     ig_rewrite_original_path = save_location[AttributionMethod.IG_REWRITE_ORIGINAL]
@@ -99,12 +97,8 @@ def run_attribution_steps(
             ig_rewrite_original_path,
         )
 
-    mlp_attribution_highlights[AttributionMethod.IG_REWRITE_ORIGINAL], _ = (
-        highlight_components(ig_rewrite_original_mlp)
-    )
-    attn_attribution_highlights[AttributionMethod.IG_REWRITE_ORIGINAL], _ = (
-        highlight_components(ig_rewrite_original_attn)
-    )
+    mlp_attribution_highlights[AttributionMethod.IG_REWRITE_ORIGINAL] = ig_rewrite_original_mlp
+    attn_attribution_highlights[AttributionMethod.IG_REWRITE_ORIGINAL] = ig_rewrite_original_attn
 
     # Run activation patching from rewrite (corrupt) to original (clean) activations
     ap_path = save_location[AttributionMethod.AP_ORIGINAL_REWRITE]
@@ -122,128 +116,86 @@ def run_attribution_steps(
         )
         torch.save((ap_mlp, ap_attn), ap_path)
 
-    mlp_attribution_highlights[AttributionMethod.AP_ORIGINAL_REWRITE], _ = (
-        highlight_components(ap_mlp)
-    )
-    attn_attribution_highlights[AttributionMethod.AP_ORIGINAL_REWRITE], _ = (
-        highlight_components(ap_attn)
-    )
+    mlp_attribution_highlights[AttributionMethod.AP_ORIGINAL_REWRITE] = ap_mlp
+    attn_attribution_highlights[AttributionMethod.AP_ORIGINAL_REWRITE] = ap_attn
 
     return mlp_attribution_highlights, attn_attribution_highlights
 
 
-def identify_target_components(highlighted_dict: dict):
-    ig_rewrite_original_highlighted = highlighted_dict[
-        AttributionMethod.IG_REWRITE_ORIGINAL
-    ]
-    ig_original_rewrite_highlighted = highlighted_dict[
-        AttributionMethod.IG_ORIGINAL_REWRITE
-    ]
-    ap_highlighted = highlighted_dict[AttributionMethod.AP_ORIGINAL_REWRITE]
+def identify_target_components(attribution_scores: dict):
+    ig_rewrite_original = attribution_scores[AttributionMethod.IG_REWRITE_ORIGINAL]
+    ig_original_rewrite = attribution_scores[AttributionMethod.IG_ORIGINAL_REWRITE]
+    # ap_highlighted = attribution_scores[AttributionMethod.AP_ORIGINAL_REWRITE]
 
     # Identify minimal components as those with high attribution scores in both IG and AP.
-    minimal_components = ig_rewrite_original_highlighted & ap_highlighted
+    # minimal_components = ig_rewrite_original_highlighted & ap_highlighted
 
     # Identify latent components as those with high attribution scores in only one direction of IG.
-    latent_components = (
-        ig_rewrite_original_highlighted ^ ig_original_rewrite_highlighted
-    )
+    asymmetry_scores = asymmetry_score(ig_rewrite_original, ig_original_rewrite, is_ig=True)
+    latent_components = highlight_components(asymmetry_scores)[0]
+
+    important_components = highlight_components(ig_rewrite_original)[0]
+    target_components = important_components | latent_components
+
+    return target_components
+    # latent_components = (
+    #     ig_rewrite_original_highlighted ^ ig_original_rewrite_highlighted
+    # )
+
     # print("LATENT COMPONENTS", [torch.count_nonzero(lc) for lc in latent_components])
 
     # Get union of minimal and latent components
-    target_components = minimal_components | latent_components
+    # target_components = minimal_components | latent_components
     # target_components = latent_components
-    return target_components
+    # return target_components
 
 
-def inverted_hinge_loss(output_logits, target_index):
-    logit_probs = torch.softmax(output_logits, dim=-1)
-    # Get probability of target token for each sample
-    # target_prob = torch.gather(logit_probs, dim=1, index=target_index.unsqueeze(1))
-    target_prob = logit_probs[:, target_index]
-    # Get max probability of non-target tokens
-    nontarget_probs = logit_probs.clone()
-    nontarget_probs[:, target_index] = -math.inf
-    max_nontarget_prob = torch.max(nontarget_probs, dim=-1)[0]
-    # Calculate IHL
-    return (1 + target_prob - max_nontarget_prob).sum()
+def localise_models(
+    model: HookedTransformer,
+    original_prompts: list[str],
+    rewrite_prompts: list[str],
+    answer_labels: Tensor,
+    overwrite=False,
+):
+    assert len(original_prompts) == len(rewrite_prompts), f"Must have same number of prompts"
+    n_samples = len(original_prompts)
+
+    # Tokenise all together to ensure shapes stay the same
+    tokenised = model.to_tokens(original_prompts + rewrite_prompts, prepend_bos=False)
+    original_tokens, rewrite_tokens = [tokenised[i:i + n_samples] for i in range(0, len(tokenised), n_samples)]
+    # print(original_tokens.shape, rewrite_tokens.shape)
+
+    original_logits, original_cache = model.run_with_cache(original_tokens)
+    original_logit_diff = logit_diff_metric(original_logits, answer_labels)
+    # print(f"Original logit difference: {original_logit_diff}")
+
+    rewrite_logits, rewrite_cache = model.run_with_cache(rewrite_tokens)
+    rewrite_logit_diff = logit_diff_metric(rewrite_logits, answer_labels)
+    # print(f"Rewrite logit difference: {rewrite_logit_diff}")
+
+    mlp_highlighted, attn_highlighted = run_attribution_steps(
+        model,
+        original_tokens,
+        rewrite_tokens,
+        answer_labels,
+        original_cache,
+        rewrite_cache,
+        original_logit_diff,
+        rewrite_logit_diff,
+        overwrite
+    )
+
+    target_mlp = identify_target_components(mlp_highlighted).to(model.cfg.device)
+    target_attn = identify_target_components(attn_highlighted).to(model.cfg.device)
+
+    return target_mlp, target_attn
 
 
-def inverted_ce_loss(logits: Tensor, target_idx: Tensor):
-    probs = F.log_softmax(logits, dim=-1)
-    return -probs[range(len(target_idx)), target_idx].mean()
-
-
-def dominance_loss(logits: Tensor, target_idx: Tensor, margin: float = 1.0):
-    """
-    Enforces that the logit for target_idx is at least `margin` greater than all other logits.
-    """
-    batch_size, vocab_size = logits.shape
-    target_logits = logits[torch.arange(batch_size), target_idx].unsqueeze(1)  # (B, 1)
-
-    # Mask out the target logits and get all other logits
-    mask = torch.ones_like(logits, dtype=torch.bool)
-    mask[torch.arange(batch_size), target_idx] = False
-    other_logits = logits[mask].view(batch_size, vocab_size - 1)  # (B, V-1)
-
-    # Margin loss: max(0, margin - (target - other))
-    loss = F.relu(margin - (target_logits - other_logits)).mean()
-    return loss
-
-
-
-
-def multi_token_inverted_ce(logits: Tensor, answer_indices: Tensor):
-    """
-    logits: [B, V]
-    answer_indices: [B, 2, T]
-    Return CE over all forget tokens
-    """
-    forget_targets = answer_indices[:, 0, :]  # [B, T]
-    B, T = forget_targets.shape
-
-    # Repeat logits for each token in target sequence
-    logits_repeated = logits.unsqueeze(1).expand(-1, T, -1)  # [B, T, V]
-    log_probs = F.log_softmax(logits_repeated, dim=-1)  # [B, T, V]
-
-    target_log_probs = log_probs.gather(2, forget_targets.unsqueeze(-1)).squeeze(-1)  # [B, T]
-    return -target_log_probs.mean()
-
-
-def multi_token_dominance_loss(logits: torch.Tensor, answer_indices: torch.Tensor, margin: float = 1.0):
-    """
-    logits: [B, V] — one logit distribution per example
-    answer_indices: [B, 2, T] — target tokens, use index 0 (retain)
-    """
-    retain_targets = answer_indices[:, 1, :]  # [B, T]
-    B, T = retain_targets.shape
-    V = logits.shape[-1]
-
-    # Repeat logits for each token in T
-    logits_expanded = logits.unsqueeze(1).expand(B, T, V)  # [B, T, V]
-
-    # Get target logits at each token position
-    target_logits = logits_expanded.gather(2, retain_targets.unsqueeze(-1)).squeeze(-1)  # [B, T]
-
-    # Create a one-hot mask to mask out the target tokens
-    one_hot_mask = F.one_hot(retain_targets, num_classes=V).bool()  # [B, T, V]
-    logits_masked = logits_expanded.masked_fill(one_hot_mask, float('-inf'))  # [B, T, V]
-
-    # Get the max of other logits
-    max_other_logits = logits_masked.max(dim=-1).values  # [B, T]
-
-    # Compute margin-based hinge loss
-    margin_diff = target_logits - max_other_logits  # [B, T]
-    per_token_loss = F.relu(margin - margin_diff)  # [B, T]
-
-    # Return average loss over all tokens
-    return per_token_loss.mean()
-
+### FINE TUNING
 
 def optimise_edit_components(
     model: HookedTransformer,
-    forget_logits: Tensor,
-    retain_logits: Tensor,
+    logits: Tensor,
     answer_indices: Tensor,
     target_mlp_components: Tensor,
     target_attn_components: Tensor,
@@ -254,19 +206,11 @@ def optimise_edit_components(
     """
     optimiser.zero_grad()
 
-    # Decrease prediction score on original token
-    loss_forget = inverted_hinge_loss(forget_logits, answer_indices[:, 0, 0])
-    # Make prediction probability distribution similar to predictions given rewritten prompt
-    loss_rewrite = F.cross_entropy(retain_logits, answer_indices[:, 1, 0], reduction="sum")
-
-    kl_loss = torch.nn.KLDivLoss(reduction="batchmean")
-    forget_log_prob = F.log_softmax(forget_logits, dim=1)
-    rewrite_prob = F.softmax(retain_logits, dim=1)
-    loss_fluency = kl_loss(forget_log_prob, rewrite_prob)
-
-    # Because the rewrite output might not match the rewrite target token, we do not try to match the probability distribution exactly
-    loss = loss_forget + loss_rewrite + 0.5 * loss_fluency
-    print(f"Total loss: {loss}, forget loss: {loss_forget}, rewrite loss: {loss_rewrite}, fluency loss: {loss_fluency}")
+    # Fine tune on conditional likelihood of edit target given the original prompt
+    edit_target = answer_indices[:, 1].unsqueeze(1)
+    log_probs = -torch.nn.functional.log_softmax(logits, dim=-1)
+    nll_loss = log_probs.gather(dim=-1, index=edit_target)
+    loss = nll_loss.mean()
 
     loss.backward()
 
@@ -315,54 +259,13 @@ def optimise_edit_components(
     return loss
 
 
-def localise_models(
-    model: HookedTransformer,
-    original_prompts: list[str],
-    rewrite_prompts: list[str],
-    answer_labels: Tensor,
-    overwrite=False,
-):
-    assert len(original_prompts) == len(rewrite_prompts), f"Must have same number of prompts"
-    n_samples = len(original_prompts)
-
-    # Tokenise all together to ensure shapes stay the same
-    tokenised = model.to_tokens(original_prompts + rewrite_prompts, prepend_bos=False)
-    original_tokens, rewrite_tokens = [tokenised[i:i + n_samples] for i in range(0, len(tokenised), n_samples)]
-    # print(original_tokens.shape, rewrite_tokens.shape)
-
-    original_logits, original_cache = model.run_with_cache(original_tokens)
-    original_logit_diff = logit_diff_metric(original_logits, answer_labels)
-    # print(f"Original logit difference: {original_logit_diff}")
-
-    rewrite_logits, rewrite_cache = model.run_with_cache(rewrite_tokens)
-    rewrite_logit_diff = logit_diff_metric(rewrite_logits, answer_labels)
-    # print(f"Rewrite logit difference: {rewrite_logit_diff}")
-
-    # LOCALISATION STAGE
-
-    mlp_highlighted, attn_highlighted = run_attribution_steps(
-        model,
-        original_tokens,
-        rewrite_tokens,
-        answer_labels,
-        original_cache,
-        rewrite_cache,
-        original_logit_diff,
-        rewrite_logit_diff,
-        overwrite
-    )
-
-    target_mlp = identify_target_components(mlp_highlighted).to(model.cfg.device)
-    target_attn = identify_target_components(attn_highlighted).to(model.cfg.device)
-
-    return target_mlp, target_attn
-
-
 def edit_model(
     model: HookedTransformer,
     original_prompt: str,
     rewrite_prompt: str,
     answer_labels: Tensor,
+    paraphrased: list[str],
+    random: list[str],
     target_mlp: Tensor,
     target_attn: Tensor,
 ):
@@ -375,21 +278,27 @@ def edit_model(
     relevant_parameters = [
         p for name, p in model_copy.named_parameters() if "attn" in name or "mlp" in name
     ]
-    optimiser = optim.AdamW(relevant_parameters, lr=3e-4)
-    
-    # Fine tune until loss is below threshold
-    loss = math.inf
-    max_epochs = 10
-    n = 0
-    while loss > 1.5 and n < max_epochs:
-        forget_logits = model_copy(original_prompt)[:, -1, :]
-        rewrite_logits = model_copy(rewrite_prompt)[:, -1, :]
-        # answer_index = answer_labels[i, 1].unsqueeze(0)  # Aim for rewritten answer
-        
+    optimiser = optim.AdamW(relevant_parameters, lr=1e-4)
+
+    max_epochs = 5
+
+    for i in range(max_epochs):
+        logits = model_copy(original_prompt)[:, -1, :]
         loss = optimise_edit_components(
-            model_copy, forget_logits, rewrite_logits, answer_labels, target_mlp, target_attn, optimiser
+            model_copy, logits, answer_labels, target_mlp, target_attn, optimiser
         )
-        
-        n += 1
+
+        paraphrased_logits = model_copy(paraphrased)[:, -1, :]
+        paraphrased_loss = optimise_edit_components(
+            model_copy, paraphrased_logits, answer_labels, target_mlp, target_attn, optimiser
+        )
+
+        random_logits = model_copy(random)[:, -1, :]
+        random_loss = optimise_edit_components(
+            model_copy, random_logits, answer_labels, target_mlp, target_attn, optimiser
+        )
+        # random_loss = torch.tensor(0.0)
+
+        print(f"Epoch {i}/{max_epochs}, Loss: {loss.item(), paraphrased_loss.item(), random_loss.item()}")
 
     return model_copy
