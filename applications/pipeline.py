@@ -278,7 +278,7 @@ def edit_model(
     relevant_parameters = [
         p for name, p in model_copy.named_parameters() if "attn" in name or "mlp" in name
     ]
-    optimiser = optim.AdamW(relevant_parameters, lr=1e-4)
+    optimiser = optim.AdamW(relevant_parameters, lr=6e-5)
 
     max_epochs = 5
 
@@ -293,12 +293,11 @@ def edit_model(
             model_copy, paraphrased_logits, answer_labels, target_mlp, target_attn, optimiser
         )
 
-        random_logits = model_copy(random)[:, -1, :]
-        random_loss = optimise_edit_components(
-            model_copy, random_logits, answer_labels, target_mlp, target_attn, optimiser
+        rewrite_logits = model_copy(rewrite_prompt)[:, -1, :]
+        rewrite_loss = optimise_edit_components(
+            model_copy, rewrite_logits, answer_labels, target_mlp, target_attn, optimiser
         )
-        # random_loss = torch.tensor(0.0)
 
-        print(f"Epoch {i}/{max_epochs}, Loss: {loss.item(), paraphrased_loss.item(), random_loss.item()}")
+        print(f"Epoch {i}/{max_epochs}, Loss: {loss.item(), paraphrased_loss.item(), rewrite_loss.item()}")
 
     return model_copy
