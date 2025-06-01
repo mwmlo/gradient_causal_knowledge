@@ -78,7 +78,7 @@ ap_attn = torch.load("results/aligned/ioi/ap_attn.pt")
 
 scaled_ig_attn = ig_attn * 1e5
 attn_outliers = identify_outliers(scaled_ig_attn, ap_attn)
-mlp_outliers = identify_outliers(ig_mlp, ap_mlp)
+mlp_outliers = identify_outliers(ig_mlp, ap_mlp, percentile=0.99)
 
 
 # In[13]:
@@ -198,9 +198,10 @@ print(f"Average random attention ablation performance: {average_random_attn_abla
 # In[ ]:
 
 
-mlp_outlier_isolated_ablation_scores = [{} for _ in range(100)]
+mlp_outlier_isolated_ablation_scores = [{} for _ in range(50)]
 
 for sample, layer, idx in mlp_outliers:
+    print(f"Ablating neuron sample {sample}")
     score = test_single_ablated_performance(model, layer, idx, mean_corrupt_activations, Task.IOI, is_attn=False)
     mlp_outlier_isolated_ablation_scores[sample][(layer.item(), idx.item())] = score.item()
 
@@ -229,7 +230,7 @@ print(f"MLP outlier isolated ablation performance std: {mlp_outlier_isolated_abl
 
 # Control: random ablations for neurons
 all_mlp_indices = [(layer, idx) for layer in range(model.cfg.n_layers) for idx in range(model.cfg.d_mlp)]
-random_mlp_targets = random.sample(all_mlp_indices, 100)
+random_mlp_targets = random.sample(all_mlp_indices, 0.01 * model.cfg.n_layers * model.cfg.d_mlp)
 average_random_mlp_ablation_performance = 0.0
 for layer, idx in random_mlp_targets:
     score = test_single_ablated_performance(model, layer, idx, mean_corrupt_activations, Task.IOI, is_attn=False)
@@ -255,7 +256,7 @@ for i in range(ig_attn.size(0)):
 scaled_ig_mlp = ig_mlp * 1e5
 mlp_outliers_multi = []
 for i in range(ig_mlp.size(0)):
-    outliers = identify_outliers(scaled_ig_mlp[i], ap_mlp[i])
+    outliers = identify_outliers(scaled_ig_mlp[i], ap_mlp[i], percentile=0.99)
     mlp_outliers_multi += [(i, l, d) for l, d in outliers]
 
 
@@ -356,13 +357,13 @@ torch.save(outlier_mlp_multi_ablated_performance, "results/disagreements/outlier
 
 
 # Ablate all IG-highlighted components
-ig_mlp_highlighted, ig_mlp_indices = highlight_components(ig_mlp)
+ig_mlp_highlighted, ig_mlp_indices = highlight_components(ig_mlp, 0.99)
 ig_mlp_multi_ablated_performance, ig_mlp_multi_ablated_std = test_multi_ablated_performance(model, ig_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
 
 torch.save(ig_mlp_multi_ablated_performance, "results/disagreements/ig_mlp_multi_ablated_performance.pt")
 
 # Ablate all AP-highlighted components
-ap_mlp_highlighted, ap_mlp_indices = highlight_components(ap_mlp)
+ap_mlp_highlighted, ap_mlp_indices = highlight_components(ap_mlp, 0.99)
 ap_mlp_multi_ablated_performance, ap_mlp_multi_ablated_std = test_multi_ablated_performance(model, ap_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
 
 torch.save(ap_mlp_multi_ablated_performance, "results/disagreements/ap_mlp_multi_ablated_performance.pt")
@@ -377,11 +378,11 @@ torch.save(shared_mlp_multi_ablated_performance, "results/disagreements/shared_m
 # In[ ]:
 
 
-random_mlp_multi_ablated_performance = torch.load("results/disagreements/random_mlp_multi_ablated_performance.pt")
-outlier_mlp_multi_ablated_performance = torch.load("results/disagreements/outlier_mlp_multi_ablated_performance.pt")
-ig_mlp_multi_ablated_performance = torch.load("results/disagreements/ig_mlp_multi_ablated_performance.pt")
-ap_mlp_multi_ablated_performance = torch.load("results/disagreements/ap_mlp_multi_ablated_performance.pt")
-shared_mlp_multi_ablated_performance = torch.load("results/disagreements/shared_mlp_multi_ablated_performance.pt")
+# random_mlp_multi_ablated_performance = torch.load("results/disagreements/random_mlp_multi_ablated_performance.pt")
+# outlier_mlp_multi_ablated_performance = torch.load("results/disagreements/outlier_mlp_multi_ablated_performance.pt")
+# ig_mlp_multi_ablated_performance = torch.load("results/disagreements/ig_mlp_multi_ablated_performance.pt")
+# ap_mlp_multi_ablated_performance = torch.load("results/disagreements/ap_mlp_multi_ablated_performance.pt")
+# shared_mlp_multi_ablated_performance = torch.load("results/disagreements/shared_mlp_multi_ablated_performance.pt")
 
 # plt.title("Model performance after simultaneous ablation of neurons")
 # plt.xlabel("Method(s) to highlight ablated neurons")

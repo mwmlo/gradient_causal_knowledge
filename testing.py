@@ -442,7 +442,7 @@ def measure_overlap(x, y):
     return jaccard
 
 
-def identify_outliers(x: Tensor, y: Tensor, only_collect_x_outliers: bool = False):
+def identify_outliers(x: Tensor, y: Tensor, only_collect_x_outliers: bool = False, percentile: float = 0.9):
     # Note that x and y should have values on the same scale
     assert x.shape == y.shape, f"Inputs must have the same shape"
 
@@ -452,7 +452,7 @@ def identify_outliers(x: Tensor, y: Tensor, only_collect_x_outliers: bool = Fals
     else:
         diff = np.abs(x - y)
 
-    outliers = highlight_components(diff)[1]
+    outliers = highlight_components(diff, percentile)[1]
 
     # diff_std = np.std(diff.numpy())
     # outliers = []
