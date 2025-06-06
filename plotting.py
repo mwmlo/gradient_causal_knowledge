@@ -3,6 +3,7 @@ from transformer_lens import HookedTransformer
 from sklearn.preprocessing import MaxAbsScaler
 import seaborn as sns
 import numpy as np
+import numpy.ma as ma
 from torch import Tensor
 
 from testing import Task
@@ -73,6 +74,11 @@ def plot_correlation(x, y, x_label: str, y_label: str, title: str):
     for i in range(n_results):
         xi = x[i].flatten().numpy()
         yi = y[i].flatten().numpy()
+
+        # Ignore NaNs
+        xi = ma.masked_invalid(xi)
+        yi = ma.masked_invalid(yi)
+
         sns.regplot(x=xi, y=yi)
         plt.xlabel(x_label)
         plt.ylabel(y_label)
@@ -81,7 +87,7 @@ def plot_correlation(x, y, x_label: str, y_label: str, title: str):
         plt.tight_layout()
         plt.show()
 
-        print(f"Correlation coefficient: {np.corrcoef(xi, yi)[0, 1]}")
+        print(f"Correlation coefficient: {ma.corrcoef(xi, yi)[0, 1]}")
 
 
 def plot_correlation_comparison(

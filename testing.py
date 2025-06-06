@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import numpy.ma as ma
 import torch
 from torch import Tensor
 from transformer_lens import HookedTransformer, ActivationCache
@@ -405,13 +406,17 @@ def average_correlation(x, y):
     xs = x.reshape(n_samples, -1)
     ys = y.reshape(n_samples, -1)
 
+    # Ignore NaNs
+    xs = ma.masked_invalid(xs)
+    ys = ma.masked_invalid(ys)
+
     correlations = []
     for x, y in zip(xs, ys):
-        corr = np.corrcoef(x, y)[0, 1]
+        corr = ma.corrcoef(x, y)[0, 1]
         correlations.append(corr)
 
-    avg_corr = np.mean(correlations)
-    std_corr = np.std(correlations)
+    avg_corr = ma.mean(correlations)
+    std_corr = ma.std(correlations)
     return avg_corr, std_corr
 
 
