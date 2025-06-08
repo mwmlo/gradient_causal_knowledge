@@ -198,23 +198,23 @@ mean_corrupt_activations = {
 # In[ ]:
 
 
-mlp_outlier_isolated_ablation_scores = [{} for _ in range(20)]
+# mlp_outlier_isolated_ablation_scores = [{} for _ in range(20)]
 
-for sample, layer, idx in mlp_outliers:
-    if sample >= 20:
-        break # Limit to first 20 samples for now
-    print(f"Ablating neuron sample {sample}")
-    score = test_single_ablated_performance(model, layer, idx, mean_corrupt_activations, Task.IOI, is_attn=False)
-    mlp_outlier_isolated_ablation_scores[sample][(layer.item(), idx.item())] = score.item()
+# for sample, layer, idx in mlp_outliers:
+#     if sample >= 20:
+#         break # Limit to first 20 samples for now
+#     print(f"Ablating neuron sample {sample}")
+#     score = test_single_ablated_performance(model, layer, idx, mean_corrupt_activations, Task.IOI, is_attn=False)
+#     mlp_outlier_isolated_ablation_scores[sample][(layer.item(), idx.item())] = score.item()
 
-torch.save(mlp_outlier_isolated_ablation_scores, "results/disagreements/mlp_outlier_isolated_ablation_scores.pt")
+# torch.save(mlp_outlier_isolated_ablation_scores, "results/disagreements/mlp_outlier_isolated_ablation_scores.pt")
 
 
 # In[19]:
 
 
 # Average model performance over all outlier components
-# mlp_outlier_isolated_ablation_scores = torch.load("results/disagreements/mlp_outlier_isolated_ablation_scores.pt")
+mlp_outlier_isolated_ablation_scores = torch.load("results/disagreements/mlp_outlier_isolated_ablation_scores.pt")
 
 per_sample_mlp_outlier_isolated_ablated_scores = [
     np.mean(list(scores.values())) if len(scores) > 0 else 0.0 for scores in mlp_outlier_isolated_ablation_scores
@@ -231,14 +231,14 @@ print(f"MLP outlier isolated ablation performance std: {mlp_outlier_isolated_abl
 
 
 # Control: random ablations for neurons
-all_mlp_indices = [(layer, idx) for layer in range(model.cfg.n_layers) for idx in range(model.cfg.d_mlp)]
-random_mlp_targets = random.sample(all_mlp_indices, 0.01 * model.cfg.n_layers * model.cfg.d_mlp)
-average_random_mlp_ablation_performance = 0.0
-for layer, idx in random_mlp_targets:
-    score = test_single_ablated_performance(model, layer, idx, mean_corrupt_activations, Task.IOI, is_attn=False)
-    average_random_mlp_ablation_performance += score.item()
-average_random_mlp_ablation_performance /= len(random_mlp_targets)
-print(f"Average random MLP ablation performance: {average_random_mlp_ablation_performance:.4f})")
+# all_mlp_indices = [(layer, idx) for layer in range(model.cfg.n_layers) for idx in range(model.cfg.d_mlp)]
+# random_mlp_targets = random.sample(all_mlp_indices, 0.01 * model.cfg.n_layers * model.cfg.d_mlp)
+# average_random_mlp_ablation_performance = 0.0
+# for layer, idx in random_mlp_targets:
+#     score = test_single_ablated_performance(model, layer, idx, mean_corrupt_activations, Task.IOI, is_attn=False)
+#     average_random_mlp_ablation_performance += score.item()
+# average_random_mlp_ablation_performance /= len(random_mlp_targets)
+# print(f"Average random MLP ablation performance: {average_random_mlp_ablation_performance:.4f})")
 
 
 # ## Performance under simultaneous ablation
@@ -255,11 +255,11 @@ print(f"Average random MLP ablation performance: {average_random_mlp_ablation_pe
 #     outliers = identify_outliers(scaled_ig_attn[i], ap_attn[i])
 #     attn_outliers_multi += [(i, l, d) for l, d in outliers]
 
-# scaled_ig_mlp = ig_mlp * 1e5
-# mlp_outliers_multi = []
-# for i in range(ig_mlp.size(0)):
-#     outliers = identify_outliers(scaled_ig_mlp[i], ap_mlp[i], percentile=0.99)
-#     mlp_outliers_multi += [(i, l, d) for l, d in outliers]
+scaled_ig_mlp = ig_mlp * 1e5
+mlp_outliers_multi = []
+for i in range(ig_mlp.size(0)):
+    outliers = identify_outliers(scaled_ig_mlp[i], ap_mlp[i], percentile=0.99)
+    mlp_outliers_multi += [(i, l, d) for l, d in outliers]
 
 
 # # In[ ]:
@@ -334,47 +334,47 @@ print(f"Average random MLP ablation performance: {average_random_mlp_ablation_pe
 # # In[ ]:
 
 
-# # Control: ablate random components (10% of the total number of components)
-# all_mlp_indices = [(layer, idx) for layer in range(model.cfg.n_layers) for idx in range(model.cfg.d_mlp)]
-# random_mlp_multi = random.sample(all_mlp_indices, 0.1 * model.cfg.n_layers * model.cfg.d_mlp)
+# Control: ablate random components (1% of the total number of components)
+all_mlp_indices = [(layer, idx) for layer in range(model.cfg.n_layers) for idx in range(model.cfg.d_mlp)]
+random_mlp_multi = random.sample(all_mlp_indices, 0.01 * model.cfg.n_layers * model.cfg.d_mlp)
 
-# random_mlp_multi_ablated_performance, random_mlp_multi_ablated_performance_std = test_multi_ablated_performance(
-#     model, random_mlp_outliers_multi, mean_corrupt_activations, Task.IOI, is_attn=False
-# )
-# print(f"Random MLP multi-ablated performance: {random_mlp_multi_ablated_performance:.4f} (baseline: {baseline_performance:.4f})")
+random_mlp_multi_ablated_performance, random_mlp_multi_ablated_performance_std = test_multi_ablated_performance(
+    model, random_mlp_outliers_multi, mean_corrupt_activations, Task.IOI, is_attn=False
+)
+print(f"Random MLP multi-ablated performance: {random_mlp_multi_ablated_performance:.4f}")
 
-# torch.save(random_mlp_multi_ablated_performance, "results/disagreements/random_mlp_multi_ablated_performance.pt")
-
-
-# # In[ ]:
-
-
-# # Ablate method-exclusive components
-# outlier_mlp_multi_ablated_performance, outlier_mlp_multi_ablated_std = test_multi_ablated_performance(model, mlp_outliers_multi, mean_corrupt_activations, Task.IOI, is_attn=False)
-
-# torch.save(outlier_mlp_multi_ablated_performance, "results/disagreements/outlier_mlp_multi_ablated_performance.pt")
+torch.save(random_mlp_multi_ablated_performance, "results/disagreements/random_mlp_multi_ablated_performance.pt")
 
 
 # # In[ ]:
 
 
-# # Ablate all IG-highlighted components
-# ig_mlp_highlighted, ig_mlp_indices = highlight_components(ig_mlp, 0.99)
-# ig_mlp_multi_ablated_performance, ig_mlp_multi_ablated_std = test_multi_ablated_performance(model, ig_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+# Ablate method-exclusive components
+outlier_mlp_multi_ablated_performance, outlier_mlp_multi_ablated_std = test_multi_ablated_performance(model, mlp_outliers_multi, mean_corrupt_activations, Task.IOI, is_attn=False)
 
-# torch.save(ig_mlp_multi_ablated_performance, "results/disagreements/ig_mlp_multi_ablated_performance.pt")
+torch.save(outlier_mlp_multi_ablated_performance, "results/disagreements/outlier_mlp_multi_ablated_performance.pt")
 
-# # Ablate all AP-highlighted components
-# ap_mlp_highlighted, ap_mlp_indices = highlight_components(ap_mlp, 0.99)
-# ap_mlp_multi_ablated_performance, ap_mlp_multi_ablated_std = test_multi_ablated_performance(model, ap_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
 
-# torch.save(ap_mlp_multi_ablated_performance, "results/disagreements/ap_mlp_multi_ablated_performance.pt")
+# # In[ ]:
 
-# # Ablate all IG and AP highlighted components
-# shared_mlp_indices = (ig_mlp_highlighted & ap_mlp_highlighted).nonzero()
-# shared_mlp_multi_ablated_performance, shared_mlp_multi_ablated_std = test_multi_ablated_performance(model, shared_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
 
-# torch.save(shared_mlp_multi_ablated_performance, "results/disagreements/shared_mlp_multi_ablated_performance.pt")
+# Ablate all IG-highlighted components
+ig_mlp_highlighted, ig_mlp_indices = highlight_components(ig_mlp, 0.99)
+ig_mlp_multi_ablated_performance, ig_mlp_multi_ablated_std = test_multi_ablated_performance(model, ig_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+
+torch.save(ig_mlp_multi_ablated_performance, "results/disagreements/ig_mlp_multi_ablated_performance.pt")
+
+# Ablate all AP-highlighted components
+ap_mlp_highlighted, ap_mlp_indices = highlight_components(ap_mlp, 0.99)
+ap_mlp_multi_ablated_performance, ap_mlp_multi_ablated_std = test_multi_ablated_performance(model, ap_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+
+torch.save(ap_mlp_multi_ablated_performance, "results/disagreements/ap_mlp_multi_ablated_performance.pt")
+
+# Ablate all IG and AP highlighted components
+shared_mlp_indices = (ig_mlp_highlighted & ap_mlp_highlighted).nonzero()
+shared_mlp_multi_ablated_performance, shared_mlp_multi_ablated_std = test_multi_ablated_performance(model, shared_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+
+torch.save(shared_mlp_multi_ablated_performance, "results/disagreements/shared_mlp_multi_ablated_performance.pt")
 
 
 # # In[ ]:
