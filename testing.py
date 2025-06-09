@@ -342,6 +342,8 @@ def test_multi_ablated_performance(
     task: Task,
     is_attn: bool,
     n_samples=100,
+    get_perf_diff: bool = False,
+    baseline_performance: Tensor = None,
 ):
     """
     Evaluate the model's performance on a task dataset, when component at (layer_idx, component_idx) is ablated.
@@ -394,6 +396,14 @@ def test_multi_ablated_performance(
         performances += list(performance)
 
     performances = torch.tensor(performances)
+
+    if get_perf_diff:
+        diffs = performances - baseline_performance
+        mean_perf_diff = diffs.mean()
+        std_perf_diff = diffs.std()
+        print(f"Mean performance difference: {mean_perf_diff}, Std performance difference: {std_perf_diff}")
+        return mean_perf_diff, std_perf_diff
+
     mean_performance = performances.mean()
     std_performance = performances.std()
     print(f"Mean performance: {mean_performance}, Std performance: {std_performance}")
@@ -569,72 +579,72 @@ def run_latent_ablation_experiment(
 
     # 1. Ablate all OR components at once.
     latent_ig_attn_ablation_scores["OR"] = test_multi_ablated_performance(
-        model, or_ig_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, or_ig_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ap_attn_ablation_scores["OR"] = test_multi_ablated_performance(
-        model, or_ap_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, or_ap_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
 
     latent_ig_mlp_ablation_scores["OR"] = test_multi_ablated_performance(
-        model, or_ig_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, or_ig_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ap_mlp_ablation_scores["OR"] = test_multi_ablated_performance(
-        model, or_ap_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, or_ap_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
 
     # 2. Ablate all AND components at once.
     latent_ig_attn_ablation_scores["AND"] = test_multi_ablated_performance(
-        model, and_ig_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, and_ig_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ap_attn_ablation_scores["AND"] = test_multi_ablated_performance(
-        model, and_ap_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, and_ap_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
 
     latent_ig_mlp_ablation_scores["AND"] = test_multi_ablated_performance(
-        model, and_ig_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, and_ig_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ap_mlp_ablation_scores["AND"] = test_multi_ablated_performance(
-        model, and_ap_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, and_ap_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
 
     # 3. Ablate all IG-AP components (those highlighted by both IG and AP at once).
     both_attn_ablated_performance = test_multi_ablated_performance(
-        model, both_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, both_attn_indices, mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ig_attn_ablation_scores["IG-AP"] = both_attn_ablated_performance
     latent_ap_attn_ablation_scores["IG-AP"] = both_attn_ablated_performance
 
     both_mlp_ablated_performance = test_multi_ablated_performance(
-        model, both_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, both_mlp_indices, mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ig_mlp_ablation_scores["IG-AP"] = both_mlp_ablated_performance
     latent_ap_mlp_ablation_scores["IG-AP"] = both_mlp_ablated_performance
 
     # 4. Ablate all OR components and IG-AP components.
     latent_ig_attn_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
-        model, or_ig_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, or_ig_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ap_attn_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
-        model, or_ap_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, or_ap_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
 
     latent_ig_mlp_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
-        model, or_ig_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, or_ig_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ap_mlp_ablation_scores["OR + IG-AP"] = test_multi_ablated_performance(
-        model, or_ap_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, or_ap_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
 
     # 5. Ablate all AND components and IG-AP components.
     latent_ig_attn_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
-        model, and_ig_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, and_ig_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ap_attn_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
-        model, and_ap_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, and_ap_attn_indices.tolist() + both_attn_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
 
     latent_ig_mlp_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
-        model, and_ig_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, and_ig_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
     latent_ap_mlp_ablation_scores["AND + IG-AP"] = test_multi_ablated_performance(
-        model, and_ap_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, and_ap_mlp_indices.tolist() + both_mlp_indices.tolist(), mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
     
     # 6. Ablate all components highlighted by IG.
     latent_ig_attn_ablation_scores["IG"] = test_multi_ablated_performance(
-        model, ig_attn_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, ig_attn_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
 
     latent_ig_mlp_ablation_scores["IG"] = test_multi_ablated_performance(
-        model, ig_mlp_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, ig_mlp_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
 
     # 7. Ablate all components highlighted by AP.
     latent_ap_attn_ablation_scores["AP"] = test_multi_ablated_performance(
-        model, ap_attn_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=True)
+        model, ap_attn_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=True, get_perf_diff=True, baseline_performance=baseline_performance)
 
     latent_ap_mlp_ablation_scores["AP"] = test_multi_ablated_performance(
-        model, ap_mlp_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=False)
+        model, ap_mlp_significant_indices, mean_corrupt_activations, Task.IOI, is_attn=False, get_perf_diff=True, baseline_performance=baseline_performance)
 
     ig_attn_loc = f"results/latent_components/{task.name.lower()}/latent_ig_attn_ablation_scores.pt"
     torch.save(latent_ig_attn_ablation_scores, ig_attn_loc)
