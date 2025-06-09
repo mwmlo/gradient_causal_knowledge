@@ -302,7 +302,7 @@ mean_corrupt_activations = {
 mlp_outlier_isolated_ablation_scores = [{} for _ in range(50)]
 
 for sample, layer, idx in mlp_outliers:
-    if sample > 50:
+    if sample >= 50:
         break
     score = test_single_ablated_performance(model, layer, idx, mean_corrupt_activations, Task.IOI, is_attn=False)
     mlp_outlier_isolated_ablation_scores[sample][(layer.item(), idx.item())] = score.item()
@@ -389,7 +389,7 @@ ig_ap_highlighted_mlp_ablation_scores = []
 print(ig_ap_mlp_highlighted.shape)
 
 for sample, layer, idx in ig_ap_mlp_highlighted:
-    if len(ig_ap_highlighted_mlp_ablation_scores) > 10_000:
+    if len(ig_ap_highlighted_mlp_ablation_scores) >= 10_000:
         break
     print(f"Evaluating sample {sample}")
     score = test_single_ablated_performance(model, layer, idx, mean_corrupt_activations, Task.IOI, is_attn=False)
