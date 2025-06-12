@@ -8,9 +8,11 @@ Core functionality for our experimental framework is located in:
 - `testing.py` (evaluation dataset and performance measurement functionality)
 - `plotting.py` (useful visualition utility functions)
 
-Experiments and graphs are contained in Jupyter notebooks. Key experiments detailed in the report are `1 - Aligned baselines`, `2 - Important Disagreements`, `4 - Latent components`, `5 - CounterFact`, `7 - Latent Circuits` and `10 - Verifying Disagreements`. The remaining notebooks contain supplementary experiments.
+Experiments and graphs are contained in Jupyter notebooks. Key experiments detailed in the report are `1 - Aligned baselines`, `2 - Important Disagreements`, `4 - Latent components`, `7 - Latent Circuits` and `10 - Verifying Disagreements`. The remaining notebooks contain supplementary experiments.
 
-Evaluations are contained in submodules. Evaluations for circuit localisation on the Mechanistic Interpretability Benchmark are stored in `MIB-circuit-track`, and evaluations for model editing on the CounterFact benchmark are stored in `rome-evaluations`.
+For the development of our novel method to identify latent components in circuits, we used the `5 - CounterFact` notebook and experimental code in `applications/` for fast iterations.
+
+However, the actual code implementations for evaluations are contained in submodules, which also include benchmark evaluation suites. Evaluations for circuit localisation on the Mechanistic Interpretability Benchmark are stored in `MIB-circuit-track`, and evaluations for model editing on the CounterFact benchmark are stored in `rome-evaluations`.
 
 To set up and run these experiments, first create a Python virtual environment:
 
