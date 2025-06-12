@@ -1,0 +1,6 @@
+[submodule "MIB-circuit-track"]
+	path = MIB-circuit-track
+	url = https://github.com/mwmlo/MIB-circuit-track.git
+[submodule "rome-evaluations"]
+	path = rome-evaluations
+	url = https://github.com/mwmlo/rome-evaluations.git
